@@ -47,6 +47,5 @@ def extract_text(page_link):
         else:
             pass                                # 丢弃空行
     text = title + '\n\n' + text
-
     return text, title
 

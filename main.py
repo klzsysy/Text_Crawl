@@ -71,12 +71,6 @@ def process(fx, link_list, retry):
             loggings.debug('%s %s add timeout_url list' % (count, link))
             timeout_url.append([count, link])
         else:
-            # try:
-            #     with open('.\down_text\%-4s %s.txt' % (str(count), title), 'w') as f:
-            #         f.write(page_text)
-            #     loggings.debug('%-4s %s data write file complete' % (count, title))
-            # except UnicodeEncodeError as err:
-            #     pass
             D = Decodes()
             wr = D.write_text(count, title, page_text)
             if not wr:

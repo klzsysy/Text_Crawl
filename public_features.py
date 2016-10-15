@@ -58,7 +58,7 @@ class Decodes():
         C = 'utf-8'
         D = 'big5'      # 繁体中文
         E = 'GB18030'   # 中文、日文及朝鲜语
-        self.lists = [A,B,C,D,E]
+        self.lists = [A, B, C, D, E]
         self.n = 0
 
     def decodes(self, text):
@@ -112,14 +112,7 @@ def init_logs():
     logs.addHandler(debug_handler)
 
     logs.info('The log module initialization is complete')
-    # logs.debug('detection_path = %s ' % detection_path)
-    # logs.debug('interval = %d' % interval)
-    # logs.debug('enable_log = %s' % enable_log)
-    # logs.debug('log_path = %s' % log_path)
-    # logs.debug('log_name = %s' % log_name)
-    # logs.debug('result_path = %s' % result_path)
-    # logs.debug('detection_path = %s' % detection_path)
-    # logs.debug('result_file = %s' % result_file_path)
+
     return logs
 
 loggings = init_logs()
