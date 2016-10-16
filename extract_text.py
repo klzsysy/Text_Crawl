@@ -5,8 +5,12 @@ import urllib.request
 from public_features import loggings
 
 
-
 def extract_text(page_link):
+    '''
+    请求URL并提取主要文本
+    :param page_link:
+    :return: UTF-8编码的字符串
+    '''
     page_get = urllib.request.urlopen(page_link, timeout=10)
     page_read = page_get.read()
     page_get.close()

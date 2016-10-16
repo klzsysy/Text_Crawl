@@ -28,6 +28,7 @@ def text_merge(path, count):
                     shutil.copyfileobj(src, dest)
                     dest.write('\n\n')
     os.rename(os.path.join(path, "fileappend.tmp"), "text_merge.txt")
+    loggings.info('merge text: %s' % os.path.join(path, 'text_merge.txt'))
     loggings.info('text merge complete!')
 
 
@@ -99,23 +100,26 @@ class Decodes():
             else:
                 return content, self.lists[self.n]
 
-    def write_text(self, count, title, text):
+    def write_text(self, count, title, text, page_count):
         try:
-            with open('.\%s\%-4s %s.txt' % (Down_path, str(count), title), 'w', encoding='utf-8') as f:
+            with open('.\{}\{:<{}} {}.txt'.format(Down_path, str(count), len(str(page_count)),
+                                                 title), 'w', encoding='utf-8') as f:
                 f.write(text)
             loggings.debug('%-4s %s data write file complete' % (count, title))
             return True
         except UnicodeEncodeError as err:
+            '''遇到编码异常尝试使用其他编码'''
             while True:
                 try:
-                    with open('.\%s\%-4s %s.txt' % (Down_path, str(count), title), 'w', encoding=self.lists[self.n]) as f:
+                    with open('.\{}\{:<{}} {}.txt'.format(Down_path, str(count), len(str(page_count)), title),
+                              'w', encoding=self.lists[self.n]) as f:
                         f.write(text)
                 except UnicodeEncodeError as err:
                     loggings.error(str(err))
                     self.n += 1
                     continue
                 else:
-                    loggings.debug('%-4s %s data write file complete' % (count, title))
+                    loggings.debug('{:<{}} {} data write file complete'.format(count, len(str(page_count)), title))
                     return True
             loggings.error(str(err))
             return False
@@ -123,7 +127,7 @@ class Decodes():
 
 def init_logs():
     '''
-    记录日志
+    记录日志，输出到控制台和文件
     '''
     formatstr = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     logs = logging.getLogger('log')
