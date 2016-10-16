@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import re
 import urllib.request
 from public_features import loggings
-from public_features import detcet_charset, decodes
+
 
 
 def extract_text(page_link):
@@ -47,5 +47,7 @@ def extract_text(page_link):
         else:
             pass                                # 丢弃空行
     text = title + '\n\n' + text
+    """编码转换 极为重要，编码成utf-8后解码utf-8 并忽略错误的内容"""
+    text = text.encode('utf-8').decode('utf-8', 'ignore')
     return text, title
 

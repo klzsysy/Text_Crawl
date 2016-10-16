@@ -6,9 +6,9 @@ import sys
 import requests
 import chardet
 import urllib.request
-from public_features import loggings, Decodes
+from public_features import loggings, Decodes, text_merge , Down_path
 from extract_text import extract_text
-
+import threading
 
 retry_count = 3
 html_url = 'http://www.piaotian.net/html/5/5924/'
@@ -49,16 +49,16 @@ def extract_url(ori_url):
                 count += 1
                 # print('add:' + link)
     loggings.info('Analysis of original URL success')
-    return links
+    return links, count
 
 
 def process(fx, link_list, retry):
-    if not os.path.isdir('down_text'):
+    if not os.path.isdir(Down_path):
         try:
-            os.mkdir('down_text')
-            loggings.debug("create 'down_text' complete")
+            os.mkdir(Down_path)
+            loggings.debug("create %s complete" % Down_path)
         except BaseException:
-            raise OSError('can not create folder down_text')
+            raise OSError('can not create folder %s' % Down_path)
 
     while link_list:
         pop = link_list.pop(0)      # 提取一条链接并从原始列表删除
@@ -71,12 +71,14 @@ def process(fx, link_list, retry):
             loggings.debug('%s %s add timeout_url list' % (count, link))
             timeout_url.append([count, link])
         else:
+            '''写入文件'''
             D = Decodes()
             wr = D.write_text(count, title, page_text)
             if not wr:
                 loggings.error(count+title+' Unable to save!!!')
 
-    if len(timeout_url) > 0 and retry_count > 0:        # 处理异常的链接
+    '''处理异常的链接'''
+    if len(timeout_url) > 0 and retry_count > 0:
         loggings.debug('Retry the %s time' % retry)
         retry -= 1
         process(fx=extract_text, link_list=timeout_url, retry=retry)
@@ -86,17 +88,29 @@ def process(fx, link_list, retry):
             print(x[0] + x[1])
             loggings.info('script quit, But an error has occurred :(')
             sys.exit(1)
+
     loggings.info('script complete, Everything OK!')
     sys.exit(0)
+
+# class mu_threading(threading.Thread):
+#     def __init__(self):
+#         threading.Thread.__init__(self)
+#         self.daemon = True
+#         self.retry_count = 3
+#
+#     def run(self):
+#         process(extract_text, links, self.retry_count)
+
 
 if __name__ == '__main__':
     timeout_url = []
     '''从目录页面提取所有章节URL'''
-    links = extract_url(html_url)
+    links, page_count = extract_url(html_url)
     '''处理章节URL列表'''
     process(fx=extract_text, link_list=links, retry=retry_count)
-
-    '''debug'''
+    '''合并文本'''
+    text_merge(os.path.abspath('.'), count=page_count)
+    '''test'''
     # process(fx=extract_text, link_list=[[1000, 'http://www.piaotian.net/html/5/5924/4289022.html']], retry=retry_count)
 
 
