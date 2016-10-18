@@ -8,6 +8,7 @@ import fnmatch
 
 Down_path = 'down_text'
 
+
 def text_merge(path, count):
     '''
     合并文本
@@ -32,50 +33,66 @@ def text_merge(path, count):
     loggings.info('text merge complete!')
 
 
+def url_merge(url1, url2):
+    url1_segment = url1.strip('/').split('/')
+    url2_segment = url2.strip('/').split('/')
+    n, m, x = 0, 0, 0
+    for u1 in url1_segment[1:]:
+        if url1_segment[-1] == u1 and re.match('\S+\.\S{0,5}', u1):
+            continue
+        for u2 in url2_segment[n:]:
+            if u1 == u2:
+                n += 1      # 成功计数
+                break
+            else:
+                x += 1      # 失败计数
+                if n == 0:  # 成功前的失败计数
+                    m += 1
+                break
+        '''首次成功遇到失败跳出，          首次失败成功后再次失败跳出 x-m=成功后的失败次数'''
+        if (x > 0 and n > 0 and m == 0) or (x - m > 0):           # 成功匹配url2第一段
+            break
+    url = '/'.join(url1_segment[:m+1]) + '/' + url2.strip('/')
+    return url
 
-# def detcet_charset(html):
-#     """
-#     依靠网页信息检测网页编码
-#     """
-#     try:
-#         charset1 = chardet.detect(html)['encoding']
-#         charset1 = charset1.lower()
-#     except BaseException as err:
-#         print(str(err))
-#         charset1 = 'utf-8'
-#     try:
-#         """简单粗暴的抓取charset=xxx字段"""
-#         charset2 = re.search("charset=\S+\"", str(html)).group().strip("\"")
-#         charset2 = charset2.split('=')[1].lower()
-#     except BaseException as err2:
-#         print(str(err2))
-#         return charset1
-#     if charset1 != charset2:    # 第二种方法优先
-#         return charset2
-#     else:
-#         return charset1
-#
-#
-# def decodes(text):
-#     """
-#     逐步尝试解码
-#     """
-#     A = 'gb2312'    # 简体中文
-#     B = 'gbk'       # 简繁中文
-#     C = 'utf-8'
-#     D = 'big5'      # 繁体中文
-#     E = 'GB18030'   # 中文、日文及朝鲜语
-#     lists = [A,B,C,D,E]
-#     n = 0
-#     while True:
-#         try:
-#             content = text.decode(lists[n])
-#         except UnicodeDecodeError:
-#             n += 1
-#             continue
-#         else:
-#             return content, lists[n]
 
+class analysis_title(object):
+    def __init__(self, page_title, domain_title_str):
+        domain_title_str = str(domain_title_str).strip()
+        self.page_title_str = str(page_title).strip()
+        try:
+            '''尝试提取网站名'''
+            self.domain_title = re.match('(\S+)[- |:]', domain_title_str).group(1)
+        except BaseException:
+            self.domain_title = ''
+        try:
+            if not self.domain_title == '':
+                self.page_title_str = re.sub(self.domain_title, '', self.page_title_str)    # 去除网站名
+                self.rever_page_title_str = self.page_title_str[::-1]
+                self.split_str = re.match('[, -]*', self.rever_page_title_str).group()      # 取得分割符
+                if not self.split_str == '':
+                    self.title_sp = [x.strip() for x in self.page_title_str.split(self.split_str)]
+            else:       # not website title
+                self.math_text(self.page_title_str)
+                self.split_str = re.match('\S+?([, -]+)', self.page_title_str).group(1)
+                self.title_sp = [x.strip() for x in self.page_title_str.split(self.split_str)]
+        except BaseException as err:
+            loggings.error(str(err))
+            self.title_sp = [x.strip() for x in self.page_title_str.split(' ')]
+
+    def math_text(self, text):
+        if re.match('^[\S]*\s[第卷][0123456789一二三四五六七八九十零〇百千两]*[章回部节集卷].*', text):
+            return text
+        else:
+            return None
+
+    def score(self):
+        title_list = sorted(self.title_sp, key=len)
+        for x in title_list:
+            r_x = self.math_text(x)
+            if r_x:
+                return r_x
+        return title_list[-1]
 
 class Decodes():
     """
@@ -90,15 +107,15 @@ class Decodes():
         self.lists = [A, B, C, D, E]
         self.n = 0
 
-    def decodes(self, text):
-        while True:
-            try:
-                content = text.decode(self.lists[self.n])
-            except UnicodeDecodeError:
-                self.n += 1
-                continue
-            else:
-                return content, self.lists[self.n]
+    # def decodes(self, text):
+    #     while True:
+    #         try:
+    #             content = text.decode(self.lists[self.n])
+    #         except UnicodeDecodeError:
+    #             self.n += 1
+    #             continue
+    #         else:
+    #             return content, self.lists[self.n]
 
     def write_text(self, count, title, text, page_count):
         try:
@@ -144,11 +161,8 @@ def init_logs():
     logs.addHandler(debug_handler)
 
     logs.info('The log module initialization is complete')
-
     return logs
 
 loggings = init_logs()
-# text_merge(os.path.abspath('.'))
-# f = open('url2.html', 'w', encoding='gbk')
-# f.write(str(content, encoding='gbk'))
+
 

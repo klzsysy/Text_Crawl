@@ -8,7 +8,7 @@ reBODY =re.compile( r'<body.*?>([\s\S]*?)<\/body>', re.I)
 reCOMM = r'<!--.*?-->'
 reTRIM = r'<{0}.*?>([\s\S]*?)<\/{0}>'
 reTAG  = r'<[\s\S]*?>|[ \t\r\f\v]'
-
+reOTH  = r'(&nbsp;)*'
 reIMG  = re.compile(r'<img[\s\S]*?src=[\'|"]([\s\S]*?)[\'|"][\s\S]*?>')
 
 class Extractor():
@@ -38,6 +38,7 @@ class Extractor():
         self.body = re.sub(reTRIM.format("script"), "" ,re.sub(reTRIM.format("style"), "", self.body))
         # self.body = re.sub(r"[\n]+","\n", re.sub(reTAG, "", self.body))
         self.body = re.sub(reTAG, "", self.body)
+        self.body = re.sub(reOTH, '', self.body)
 
     def processBlocks(self):
         self.ctexts   = self.body.split("\n")
@@ -58,24 +59,42 @@ class Extractor():
         while self.end < lines - self.blockSize and self.cblocks[self.end] > min(self.textLens):
             self.end += 1
 
-        return "".join(self.ctexts[self.start:self.end])
+        return "\n".join(self.ctexts[self.start:self.end]).strip()
 
     def processImages(self):
         self.body = reIMG.sub(r'{{\1}}', self.body)
 
+    def processText(self):
+        '''删除特定组合的内容'''
+        lists = ("（快捷键←）上一章|返回目录|加入书签|推荐本书|返回书页|下一章（快捷键→）",
+                 "投推荐票回目录标记书签"
+                 )
+        for n in lists:
+            try:
+                self.text = self.text[:self.text.index(n)]
+            except BaseException:
+                continue
+            else:
+                break
+
+
     def getContext(self):
         code, self.rawPage = self.getRawPage()
-        self.body = re.search(reBODY, self.rawPage)
-        self.body = self.body
-
+        try:
+            self.body = re.findall(reBODY, self.rawPage)[0]
+        except BaseException:
+            self.body = self.rawPage
         if DBUG: print(code, self.rawPage)
 
         if self.saveImage:
             self.processImages()
         self.processTags()
-        return self.processBlocks()
+        self.text = self.processBlocks()
+        self.processText()
+        return self.text
         # print(len(self.body.strip("\n")))
 
+
 if __name__ == '__main__':
-    ext = Extractor(url="http://www.piaotian.net/html/5/5924/3200689.html",blockSize=5, image=False)
+    ext = Extractor(url="http://www.52dsm.com/chapter/6712/3284687.html", blockSize=5, image=False)
     print(ext.getContext())

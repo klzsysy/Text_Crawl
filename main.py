@@ -3,28 +3,20 @@ from bs4 import BeautifulSoup
 import re
 import os
 import sys
-import requests
-import chardet
 import urllib.request
-from public_features import loggings, Decodes, text_merge , Down_path
+from public_features import loggings, Decodes, text_merge , Down_path, url_merge
 from extract_text import extract_text
 import threading
 
+'''最大重试次数'''
 retry_count = 3
-html_url = 'http://www.piaotian.net/html/5/5924/'
-# re_url = requests.get(url=html_url)
-# re_url.encoding = 'gbk'
-# re_url.close()
-# soup = BeautifulSoup(re_url, 'html5lib')
-# soup = BeautifulSoup(open('url.html'), 'html5lib')
-# soup_text = soup.select('li > a')
-# links = []
-# print(repr(soup))
+'''目录页URL'''
+html_url = 'http://www.52dsm.com/chapter/6712.html'
 
 
 def extract_url(ori_url):
     '''
-    提取目录页的有效URL
+    提取目录页的有效URL，抓取网站title
     :param ori_url: 目录页URL
     :return:        提取的章节URL 列表
     '''
@@ -33,31 +25,58 @@ def extract_url(ori_url):
     info = result.info()
     loggings.info('read original URL complete！')
     # 获取协议，域名
-    proto, rest = urllib.request.splittype(html_url)
+    proto, rest = urllib.request.splittype(ori_url)
     domain = urllib.request.splithost(rest)[0]
-
-    # charset = page_features.detcet_charset(content)
 
     result.close()
     soup = BeautifulSoup(content, 'html5lib')
     soup_text = soup.select('li > a')
     links = []
     count = 0
+
     for tag in soup_text:
         try:
             link = tag.attrs.get('href')
         except BaseException:
             pass
         else:
-            if re.match('^\d+', link):
-                links.append([count, proto + '://' + rest.strip('/') + '/' + link])
+            if re.match('^javascript|/?class', link):
+                continue
+            if re.match('^\d+\.\S{1,5}$|/\S+\.\S{1,5}$', link):     # '单节数值' 与 '多节组合'
+                merge_link = url_merge(rest, link)
+                links.append([count, proto + '://' + merge_link])
                 count += 1
                 # print('add:' + link)
     loggings.info('Analysis of original URL success')
-    return links, count
+    loggings.debug('start get website title...')
+
+    website_title_retry = retry_count
+    donain_title_text = ''
+
+    def website_title():
+        try:
+            domain_result = urllib.request.urlopen(proto + "://" + domain, timeout=15)
+            domain_content = domain_result.read()
+            domain_result.close()
+            donain_soup = BeautifulSoup(domain_content, 'html5lib')
+            text = donain_soup.title.get_text()
+        except BaseException as err:
+            loggings.error(str(err))
+            loggings.debug('retry get website title ')
+            return False, ''
+        else:
+            loggings.info('get website title complete！')
+            return True, text
+    while website_title_retry > 0:
+        website_title_retry -= 1
+        status, donain_title_text = website_title()
+        if status:
+            break
+
+    return links, count, donain_title_text
 
 
-def process(fx, link_list, retry):
+def process(fx, link_list, retry, domain_title):
     '''
     章节页面处理
     :param fx:          提取文本
@@ -76,7 +95,7 @@ def process(fx, link_list, retry):
         count = pop[0]              # 序号
         link = pop[1]               # 超链接
         try:
-            page_text, title = fx(link)
+            page_text, title = fx(link, domain_title)
         except BaseException as err:
             loggings.warning('%s read data fail' % link + str(err))
             loggings.debug('%s %s add timeout_url list' % (count, link))
@@ -87,13 +106,14 @@ def process(fx, link_list, retry):
             '''              当前序号 标题     文本内容   总页面数'''
             wr = D.write_text(count, title, page_text, page_count)
             if not wr:
+                Unable_write.append([count, link])
                 loggings.error(count+title+' Unable to save!!!')
 
     '''处理异常的链接'''
     if len(timeout_url) > 0 and retry > 0:
         loggings.debug('Retry the %s time' % retry)
         retry -= 1
-        process(fx=extract_text, link_list=timeout_url, retry=retry)
+        process(fx=extract_text, link_list=timeout_url, retry=retry, domain_title=domain_title)
     if len(timeout_url) > 0 and retry == 0:
         loggings.error('重试 %s次后，以下列表仍无法完成:' % retry)
         for x in timeout_url:
@@ -103,9 +123,9 @@ def process(fx, link_list, retry):
 
 
 def multithreading():
-    '''
+    """
     页面处理多线程化
-    '''
+    """
     class mu_threading(threading.Thread):
         def __init__(self):
             threading.Thread.__init__(self)
@@ -113,7 +133,7 @@ def multithreading():
             self.retry_count = retry_count
 
         def run(self):
-            process(extract_text, links, self.retry_count)
+            process(extract_text, links, self.retry_count, domain_title=domain_title)
 
     mu_list = []
     for num in range(os.cpu_count()):
@@ -127,16 +147,22 @@ def multithreading():
 
 if __name__ == '__main__':
     timeout_url = []
+    Unable_write   = []
     '''从目录页面提取所有章节URL'''
-    links, page_count = extract_url(html_url)
+    links, page_count, domain_title = extract_url(html_url)
     '''多线程处理处理章节URL'''
     multithreading()
     # '''单线程处理章节URL列表'''
-    # process(fx=extract_text, link_list=links, retry=retry_count)
+    # process(fx=extract_text, link_list=links, retry=retry_count, domain_title=domain_title)
     '''合并文本'''
     text_merge(os.path.abspath('.'), count=page_count)
 
-    loggings.info('script complete, Everything OK!')
-    sys.exit(0)
+    if len(Unable_write) == 0:
+        loggings.info('script complete, Everything OK!')
+        sys.exit(0)
+    loggings.info('script complete, EBut there are some errors :(')
+    loggings.error('Unable to write to file list:')
+    print(Unable_write)
+    sys.exit(1)
 
     # process(fx=extract_text, link_list=[[1000,'http://www.piaotian.net/html/5/5924/4289022.html']], retry=retry_count)
