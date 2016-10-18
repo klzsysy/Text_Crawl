@@ -13,7 +13,7 @@ reTRIM = r'<{0}.*?>([\s\S]*?)<\/{0}>'
 reTAG  = r'<[\s\S]*?>|[ \t\r\f\v]'
 reOTH  = r'(&nbsp;)*'
 reIMG  = re.compile(r'<img[\s\S]*?src=[\'|"]([\s\S]*?)[\'|"][\s\S]*?>')
-
+minimum_effective_value = 100
 
 class Extractor():
     """
@@ -46,6 +46,8 @@ class Extractor():
         self.ctexts   = self.body.split("\n")
         self.textLens = [len(text) for text in self.ctexts]
 
+        if max(self.textLens) <= minimum_effective_value:
+            return None
         self.cblocks  = [0]*(len(self.ctexts) - self.blockSize - 1)
         lines = len(self.ctexts)
         for i in range(self.blockSize):
@@ -58,8 +60,11 @@ class Extractor():
         self.start = self.end = self.cblocks.index(maxTextLen)
         while self.start > 0 and self.cblocks[self.start] > min(self.textLens):
             self.start -= 1
-        while self.end < lines - self.blockSize and self.cblocks[self.end] > min(self.textLens):
-            self.end += 1
+        try:
+            while self.end < lines - self.blockSize and self.cblocks[self.end] > min(self.textLens):
+                self.end += 1
+        except BaseException:
+            return None
 
         return "\n".join(self.ctexts[self.start:self.end]).strip()
 
@@ -70,7 +75,8 @@ class Extractor():
         """删除特定组合的内容"""
         lists = ("（快捷键←）",
                  "上一章", "返回目录", "加入书签", "推荐本书", "返回书页", "下一章", "（快捷键→）",
-                 "投推", "荐票", "回目录", "标记", "书签"
+                 "投推", "荐票", "回目录", "标记", "书签","登陆", "注册",'新用户', 'FAQ', '道具', '商城', '每日任务',
+                 '咨询','投诉', '举报'
                  )
         self.f = self.text.split('\n')
 
@@ -88,6 +94,7 @@ class Extractor():
 
         self.text = self.text[:iter_text(self)].strip()
 
+
     def getContext(self):
         self.rawPage = self.html
         try:
@@ -100,8 +107,13 @@ class Extractor():
             self.processImages()
         self.processTags()
         self.text = self.processBlocks()
+        if self.text is None:
+            return None
         self.processText()
-        return self.text
+        if len(self.text) < minimum_effective_value:
+            return False
+        else:
+            return self.text
 
 
 def extract_text(page_link, domain_title):
@@ -110,7 +122,12 @@ def extract_text(page_link, domain_title):
     :param page_link:
     :return: UTF-8编码的字符串
     '''
-    page_get = urllib.request.urlopen(page_link, timeout=10)
+    headers = {'User-Agent':
+                   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                   'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
+               }
+    request = urllib.request.Request(page_link, headers=headers)
+    page_get = urllib.request.urlopen(request, timeout=10)
     page_read = page_get.read()
     page_get.close()
     loggings.debug('%s Read complete!' % page_link)
@@ -129,7 +146,12 @@ def extract_text(page_link, domain_title):
     ext = Extractor(html=str(page_soup))
     text = ext.getContext()
 
+    if text is None:
+        loggings.warning('没有有效的文本可供提取，可能是无效页面或者确认请求的站点是否需要登录')
+        return None, title_analysis
+
     text = title_analysis + '\n\n' + text
+    print(text)
     """编码转换 极为重要，编码成utf-8后解码utf-8 并忽略错误的内容"""
     text = text.encode('utf-8').decode('utf-8', 'ignore')
     return text, title_analysis

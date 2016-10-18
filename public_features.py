@@ -8,6 +8,29 @@ import fnmatch
 
 Down_path = 'down_text'
 
+def init_logs():
+    '''
+    记录日志，输出到控制台和文件
+    '''
+    formatstr = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    logs = logging.getLogger('log')
+    logs.setLevel(logging.DEBUG)
+
+    out_file = logging.FileHandler(filename='run_logs.txt', encoding='utf8')
+    out_file.setLevel(logging.DEBUG)
+    out_file.setFormatter(formatstr)
+    logs.addHandler(out_file)
+
+    debug_handler = logging.StreamHandler()
+    debug_handler.setLevel(logging.DEBUG)
+    debug_handler.setFormatter(formatstr)
+    logs.addHandler(debug_handler)
+
+    logs.info('The log module initialization is complete')
+    return logs
+
+loggings = init_logs()
+
 
 def text_merge(path, count):
     '''
@@ -69,15 +92,19 @@ class analysis_title(object):
             if not self.domain_title == '':
                 self.page_title_str = re.sub(self.domain_title, '', self.page_title_str)    # 去除网站名
                 self.rever_page_title_str = self.page_title_str[::-1]
-                self.split_str = re.match('[, -]*', self.rever_page_title_str).group()      # 取得分割符
-                if not self.split_str == '':
+                try:
+                    self.split_str = re.search('[\|, -]+', self.rever_page_title_str).group()   # 取得分割符 搜索第一个分割符号
+                except AttributeError as err:
+                    loggings.error('analysis_title 无法找到分隔符号:' + str(err))
+                    self.title_sp = [x.strip() for x in self.page_title_str.split(' ')]
+                else:
                     self.title_sp = [x.strip() for x in self.page_title_str.split(self.split_str)]
             else:       # not website title
                 self.math_text(self.page_title_str)
                 self.split_str = re.match('\S+?([, -]+)', self.page_title_str).group(1)
                 self.title_sp = [x.strip() for x in self.page_title_str.split(self.split_str)]
         except BaseException as err:
-            loggings.error(str(err))
+            loggings.error('analysis_title:' + str(err))
             self.title_sp = [x.strip() for x in self.page_title_str.split(' ')]
 
     def math_text(self, text):
@@ -118,6 +145,8 @@ class Decodes():
     #             return content, self.lists[self.n]
 
     def write_text(self, count, title, text, page_count):
+        if text is None or text == '':
+            return True
         try:
             with open('.\{}\{:<{}} {}.txt'.format(Down_path, str(count), len(str(page_count)),
                                                  title), 'w', encoding='utf-8') as f:
@@ -142,27 +171,10 @@ class Decodes():
             return False
 
 
-def init_logs():
-    '''
-    记录日志，输出到控制台和文件
-    '''
-    formatstr = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    logs = logging.getLogger('log')
-    logs.setLevel(logging.DEBUG)
-
-    out_file = logging.FileHandler(filename='run_logs.txt', encoding='utf8')
-    out_file.setLevel(logging.DEBUG)
-    out_file.setFormatter(formatstr)
-    logs.addHandler(out_file)
-
-    debug_handler = logging.StreamHandler()
-    debug_handler.setLevel(logging.DEBUG)
-    debug_handler.setFormatter(formatstr)
-    logs.addHandler(debug_handler)
-
-    logs.info('The log module initialization is complete')
-    return logs
-
-loggings = init_logs()
-
-
+def try_mkdir(path):
+    if not os.path.isdir(path):
+        try:
+            os.mkdir(Down_path)
+            loggings.debug("create %s complete" % path)
+        except BaseException:
+            raise OSError('can not create folder %s' % path)

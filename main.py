@@ -4,14 +4,14 @@ import re
 import os
 import sys
 import urllib.request
-from public_features import loggings, Decodes, text_merge , Down_path, url_merge
+from public_features import loggings, Decodes, text_merge , Down_path, url_merge, try_mkdir
 from extract_text import extract_text
 import threading
 
 '''最大重试次数'''
 retry_count = 3
 '''目录页URL'''
-html_url = 'http://www.52dsm.com/chapter/6712.html'
+html_url = 'http://read.qidian.com/BookReader/9sW8fN_RiY7xq9ZHzk0vMw2.aspx'
 
 
 def extract_url(ori_url):
@@ -20,15 +20,26 @@ def extract_url(ori_url):
     :param ori_url: 目录页URL
     :return:        提取的章节URL 列表
     '''
-    result = urllib.request.urlopen(ori_url, timeout=15)
+    headers = {'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        ' AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
+    }
+    request = urllib.request.Request(ori_url, headers=headers)
+    result = urllib.request.urlopen(request, timeout=15)
     content = result.read()
     info = result.info()
     loggings.info('read original URL complete！')
     # 获取协议，域名
     proto, rest = urllib.request.splittype(ori_url)
     domain = urllib.request.splithost(rest)[0]
-
     result.close()
+
+    if 'qidian.com' in domain:
+        import qidian_config
+        loggings.info('go to qidian configure')
+        qidian_config.main(ori_url)
+        sys.exit(0)
+
     soup = BeautifulSoup(content, 'html5lib')
     soup_text = soup.select('li > a')
     links = []
@@ -46,6 +57,9 @@ def extract_url(ori_url):
                 merge_link = url_merge(rest, link)
                 links.append([count, proto + '://' + merge_link])
                 count += 1
+            if re.match('^(https?://)?((\w+\.)?\S+?\.\w+){1}/[^\s]+', link):    # 非域名URL
+                links.append([count, link])
+
                 # print('add:' + link)
     loggings.info('Analysis of original URL success')
     loggings.debug('start get website title...')
@@ -55,7 +69,8 @@ def extract_url(ori_url):
 
     def website_title():
         try:
-            domain_result = urllib.request.urlopen(proto + "://" + domain, timeout=15)
+            domain_request = urllib.request.Request(proto + "://" + domain, headers=headers)
+            domain_result = urllib.request.urlopen(domain_request, timeout=15)
             domain_content = domain_result.read()
             domain_result.close()
             donain_soup = BeautifulSoup(domain_content, 'html5lib')
@@ -73,7 +88,7 @@ def extract_url(ori_url):
         if status:
             break
 
-    return links, count, donain_title_text
+    return links, count, donain_title_text, domain
 
 
 def process(fx, link_list, retry, domain_title):
@@ -83,12 +98,7 @@ def process(fx, link_list, retry, domain_title):
     :param link_list:   页面URL总列表
     :param retry:       失败重试次数
     '''
-    if not os.path.isdir(Down_path):
-        try:
-            os.mkdir(Down_path)
-            loggings.debug("create %s complete" % Down_path)
-        except BaseException:
-            raise OSError('can not create folder %s' % Down_path)
+    try_mkdir(Down_path)
 
     while link_list:
         pop = link_list.pop(0)      # 提取一条链接并从原始列表删除
@@ -96,18 +106,21 @@ def process(fx, link_list, retry, domain_title):
         link = pop[1]               # 超链接
         try:
             page_text, title = fx(link, domain_title)
+
         except BaseException as err:
+
             loggings.warning('%s read data fail' % link + str(err))
             loggings.debug('%s %s add timeout_url list' % (count, link))
             timeout_url.append([count, link])
         else:
             '''写入文件'''
-            D = Decodes()
-            '''              当前序号 标题     文本内容   总页面数'''
-            wr = D.write_text(count, title, page_text, page_count)
-            if not wr:
-                Unable_write.append([count, link])
-                loggings.error(count+title+' Unable to save!!!')
+            if page_text:
+                D = Decodes()
+                '''              当前序号 标题     文本内容   总页面数'''
+                wr = D.write_text(count, title, page_text, page_count)
+                if not wr:
+                    Unable_write.append([count, link])
+                    loggings.error(count+title+' Unable to save!!!')
 
     '''处理异常的链接'''
     if len(timeout_url) > 0 and retry > 0:
@@ -149,11 +162,13 @@ if __name__ == '__main__':
     timeout_url = []
     Unable_write   = []
     '''从目录页面提取所有章节URL'''
-    links, page_count, domain_title = extract_url(html_url)
+    links, page_count, domain_title, domain = extract_url(html_url)
     '''多线程处理处理章节URL'''
-    multithreading()
+    # multithreading()
     # '''单线程处理章节URL列表'''
-    # process(fx=extract_text, link_list=links, retry=retry_count, domain_title=domain_title)
+    # process(fx=extract_text, link_list=[[1000, 'http://read.qidian.com/BookReader/9sW8fN_RiY7xq9ZHzk0vMw2,aJRPRNdLgHDwrjbX3WA1AA2.aspx']],
+    #         retry=retry_count, domain_title=domain_title)
+    process(fx=extract_text, link_list=links, retry=retry_count, domain_title=domain_title)
     '''合并文本'''
     text_merge(os.path.abspath('.'), count=page_count)
 
