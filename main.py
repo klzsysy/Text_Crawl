@@ -11,7 +11,7 @@ import threading
 '''最大重试次数'''
 retry_count = 3
 '''目录页URL'''
-html_url = 'http://read.qidian.com/BookReader/9sW8fN_RiY7xq9ZHzk0vMw2.aspx'
+html_url = 'http://www.52dsm.com/chapter/6712.html'
 
 
 def extract_url(ori_url):
@@ -57,8 +57,10 @@ def extract_url(ori_url):
                 merge_link = url_merge(rest, link)
                 links.append([count, proto + '://' + merge_link])
                 count += 1
+                continue
             if re.match('^(https?://)?((\w+\.)?\S+?\.\w+){1}/[^\s]+', link):    # 非域名URL
                 links.append([count, link])
+                count += 1
 
                 # print('add:' + link)
     loggings.info('Analysis of original URL success')
@@ -164,11 +166,11 @@ if __name__ == '__main__':
     '''从目录页面提取所有章节URL'''
     links, page_count, domain_title, domain = extract_url(html_url)
     '''多线程处理处理章节URL'''
-    # multithreading()
+    multithreading()
     # '''单线程处理章节URL列表'''
     # process(fx=extract_text, link_list=[[1000, 'http://read.qidian.com/BookReader/9sW8fN_RiY7xq9ZHzk0vMw2,aJRPRNdLgHDwrjbX3WA1AA2.aspx']],
     #         retry=retry_count, domain_title=domain_title)
-    process(fx=extract_text, link_list=links, retry=retry_count, domain_title=domain_title)
+    # process(fx=extract_text, link_list=links, retry=retry_count, domain_title=domain_title)
     '''合并文本'''
     text_merge(os.path.abspath('.'), count=page_count)
 
