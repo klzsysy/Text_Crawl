@@ -5,8 +5,12 @@ import logging
 import shutil
 import os
 import fnmatch
+import urllib.request
+from bs4 import BeautifulSoup
+
 
 Down_path = 'down_text'
+
 
 def init_logs():
     '''
@@ -55,6 +59,34 @@ def text_merge(path, count):
     loggings.info('merge text: %s' % os.path.join(path, 'text_merge.txt'))
     loggings.info('text merge complete!')
 
+
+def get_url_to_bs(url, re_count=0):
+    headers = {'User-Agent':
+                   'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+                   ' AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
+               }
+    if not re.match('^https?://', url):
+        url = 'http://' + url
+    request = urllib.request.Request(url, headers=headers)
+    try:
+        result = urllib.request.urlopen(request, timeout=15)
+    except BaseException as err:
+        if re_count > 0:
+            loggings.error('URL ERROR, retry %s' % re_count + str(err))
+            re_count -= 1
+            get_url_to_bs(url, re_count)
+        raise err
+    else:
+        content = result.read()
+        # info = result.info()
+        loggings.info('read original URL complete！')
+        # 获取协议，域名
+        proto, rest = urllib.request.splittype(url)
+        domain = urllib.request.splithost(rest)[0]
+        status_code = result.code
+        result.close()
+        soup = BeautifulSoup(content, 'html5lib')
+        return soup, proto, domain, rest, status_code
 
 def url_merge(url1, url2):
     url1_segment = url1.strip('/').split('/')
@@ -147,6 +179,12 @@ class Decodes():
     def write_text(self, count, title, text, page_count):
         if text is None or text == '':
             return True
+        # try:
+        #     if not re.search('[0123456789一二三四五六七八九十零〇百千两]+', title).group() == count+1:
+        #         count = ''
+        # except AttributeError:
+        #     pass
+        count = ''
         try:
             with open('.\{}\{:<{}} {}.txt'.format(Down_path, str(count), len(str(page_count)),
                                                  title), 'w', encoding='utf-8') as f:

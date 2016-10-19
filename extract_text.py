@@ -151,7 +151,6 @@ def extract_text(page_link, domain_title):
         return None, title_analysis
 
     text = title_analysis + '\n\n' + text
-    print(text)
     """编码转换 极为重要，编码成utf-8后解码utf-8 并忽略错误的内容"""
     text = text.encode('utf-8').decode('utf-8', 'ignore')
     return text, title_analysis
