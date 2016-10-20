@@ -3,15 +3,16 @@ from bs4 import BeautifulSoup
 import re
 import os
 import sys
-import urllib.request
 import public_features as PF
 from extract_text import extract_text
 import threading
+import copy
+from functools import reduce
 
 '''最大重试次数'''
 retry_count = 3
 '''目录页URL'''
-html_url = 'http://www.piaotian.net/html/5/5924/'
+html_url = 'http://www.52dsm.com/chapter/6712.html'
 
 
 def extract_url(ori_url):
@@ -22,6 +23,8 @@ def extract_url(ori_url):
     '''
 
     soup_text, protocol, domain, rest, code = PF.get_url_to_bs(ori_url, re_count=2)
+    PF.loggings.debug('read original URL complete！')
+
     # headers = {'User-Agent':
     #     'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
     #     ' AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
@@ -44,8 +47,51 @@ def extract_url(ori_url):
 
     # soup = BeautifulSoup(content, 'html5lib')
     # soup_text = soup.select('li > a')
+    PF.loggings.debug('Analysis original html...')
     GET_PAGE_LINKS = PF.get_page_links(soup_text, rest, protocol)
     all_page_links = GET_PAGE_LINKS.get_href()
+
+    '''初始化中文数字转 int'''
+    c2d = PF.chinese_to_digits()
+
+    def match_chinese(s):
+        try:
+            re_s = re.match('[第卷]?\s*([零一二三四五六七八九十百千万亿]+)', s).group(1)
+        except AttributeError:
+            re_s = '零'
+        return re_s
+
+
+
+    PF.loggings.debug('获得每个title的中文数值')
+    chinese_str = map(match_chinese, [x[-1] for x in all_page_links])
+    PF.loggings.debug('制作 chinese_str 副本')
+    test_number = copy.deepcopy(chinese_str)
+
+    PF.loggings.debug('开始分析文章列表的有序性...')
+    xx = list(map(c2d.run, list(test_number)))
+    test_number_str = ''.join([str(x) for x in xx])
+
+    count = 0
+    enabel_digtes = True
+    if re.match('0*?123456789', test_number_str):
+        enabel_digtes = False
+        PF.loggings.debug('文章列表排序正常:)')
+    else:
+        PF.loggings.debug('文章列表排序异常:( 开始分析整理顺序')
+
+    for page_group in chinese_str:
+        if enabel_digtes:
+            digtes = c2d.run(page_group)
+            all_page_links[count].append(digtes)
+        else:
+            all_page_links[count].append(count)
+        count += 1
+    if enabel_digtes:
+        all_page_links = sorted(all_page_links, key=lambda x: x[-1])
+
+    PF.loggings.debug('文章列表重排序完成')
+
     # links = []
     # count = 0
     # for tag in soup_text:
@@ -66,13 +112,13 @@ def extract_url(ori_url):
     #             count += 1
 
                 # print('add:' + link)
-    PF.loggings.info('Analysis of original URL success')
-    PF.loggings.debug('start get website title...')
+    # PF.loggings.info('Analysis of original URL success')
+    # PF.loggings.debug('start get website title...')
 
     # donain_title_text = ''
 
-    webstie_bs, _, _, _, _ = PF.get_url_to_bs(protocol + '://' + domain, re_count=1)
-    donain_title_text = webstie_bs.title.get_text()
+    # webstie_bs, _, _, _, _ = PF.get_url_to_bs(protocol + '://' + domain, re_count=1, ingore=True)
+    # donain_title_text = webstie_bs.title.get_text()
     # def website_title():
     #     try:
     #         domain_request = urllib.request.Request(protocol + "://" + domain, headers=headers)
@@ -94,10 +140,10 @@ def extract_url(ori_url):
     #     if status:
     #         break
 
-    return all_page_links, len(all_page_links), donain_title_text, domain
+    return all_page_links, len(all_page_links), domain
 
 
-def process(fx, link_list, retry, domain_title):
+def process(fx, link_list, retry):
     '''
     章节页面处理
     :param fx:          提取文本
@@ -105,40 +151,51 @@ def process(fx, link_list, retry, domain_title):
     :param retry:       失败重试次数
     '''
     PF.try_mkdir(PF.Down_path)
+    D = PF.Decodes()
 
     while link_list:
         pop = link_list.pop(0)      # 提取一条链接并从原始列表删除
-        count = pop[0]              # 序号
-        link = pop[1]               # 超链接
-        try:
-            page_text, title = fx(link, domain_title)
+        link = pop[0]              # url
+        title = pop[1]               # title
+        count = pop[2]
 
-        except BaseException as err:
-
-            PF.loggings.warning('%s read data fail' % link + str(err))
-            PF.loggings.debug('%s %s add timeout_url list' % (count, link))
-            timeout_url.append([count, link])
+        page_text = fx(link, title, retry)
+        if page_text is False:
+            Error_url.append(link)
         else:
-            '''写入文件'''
             if page_text:
-                D = PF.Decodes()
-                '''              当前序号 标题     文本内容   总页面数'''
                 wr = D.write_text(count, title, page_text, page_count)
                 if not wr:
-                    Unable_write.append([count, link])
-                    PF.loggings.error(count+title+' Unable to save!!!')
-
-    '''处理异常的链接'''
-    if len(timeout_url) > 0 and retry > 0:
-        PF.loggings.debug('Retry the %s time' % retry)
-        retry -= 1
-        process(fx=extract_text, link_list=timeout_url, retry=retry, domain_title=domain_title)
-    if len(timeout_url) > 0 and retry == 0:
-        PF.loggings.error('重试 %s次后，以下列表仍无法完成:' % retry)
-        for x in timeout_url:
-            print(x[0] + x[1])
-            PF.loggings.info('script quit, But an error has occurred :(')
-            os._exit(-1)
+                    Unable_write.append([count, title, link])
+    #     try:
+    #         page_text, title = fx(link, title, retry)
+    #
+    #     except BaseException as err:
+    #
+    #         PF.loggings.warning('%s read data fail' % link + str(err))
+    #         PF.loggings.debug('%s %s add timeout_url list' % (count, link))
+    #         timeout_url.append([count, link])
+    #     else:
+    #         '''写入文件'''
+    #         if page_text:
+    #             D = PF.Decodes()
+    #             '''              当前序号 标题     文本内容   总页面数'''
+    #             wr = D.write_text(count, title, page_text, page_count)
+    #             if not wr:
+    #                 Unable_write.append([count, link])
+    #                 PF.loggings.error(count+title+' Unable to save!!!')
+    #
+    # '''处理异常的链接'''
+    # if len(timeout_url) > 0 and retry > 0:
+    #     PF.loggings.debug('Retry the %s time' % retry)
+    #     retry -= 1
+    #     process(fx=extract_text, link_list=timeout_url, retry=retry)
+    # if len(timeout_url) > 0 and retry == 0:
+    #     PF.loggings.error('重试 %s次后，以下列表仍无法完成:' % retry)
+    #     for x in timeout_url:
+    #         print(x[0] + x[1])
+    #         PF.loggings.info('script quit, But an error has occurred :(')
+    #         os._exit(-1)
 
 
 def multithreading():
@@ -152,7 +209,7 @@ def multithreading():
             self.retry_count = retry_count
 
         def run(self):
-            process(extract_text, links, self.retry_count, domain_title=domain_title)
+            process(extract_text, links, self.retry_count)
 
     mu_list = []
     for num in range(os.cpu_count()):
@@ -165,17 +222,18 @@ def multithreading():
 
 
 if __name__ == '__main__':
-    timeout_url = []
+    Error_url = []
     Unable_write   = []
     '''从目录页面提取所有章节URL'''
-    links, page_count, domain_title, domain = extract_url(html_url)
+    links, page_count, domain = extract_url(html_url)
+    PF.loggings.debug('chapter processing starts  ')
     '''多线程处理处理章节URL'''
     # multithreading()
 
     # process(fx=extract_text, link_list=[[1000, 'http://read.qidian.com/BookReader/9sW8fN_RiY7xq9ZHzk0vMw2,aJRPRNdLgHDwrjbX3WA1AA2.aspx']],
     #         retry=retry_count, domain_title=domain_title)
     # '''单线程处理章节URL列表'''
-    process(fx=extract_text, link_list=links, retry=retry_count, domain_title=domain_title)
+    process(fx=extract_text, link_list=links, retry=retry_count)
     '''合并文本'''
     PF.text_merge(os.path.abspath('.'), count=page_count)
 

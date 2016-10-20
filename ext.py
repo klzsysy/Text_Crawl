@@ -95,6 +95,6 @@ class Extractor():
         # print(len(self.body.strip("\n")))
 
 
-if __name__ == '__main__':
-    ext = Extractor(url="http://www.52dsm.com/chapter/6712/3284687.html", blockSize=5, image=False)
-    print(ext.getContext())
+# if __name__ == '__main__':
+#     ext = Extractor(url="http://www.52dsm.com/chapter/6712/3284687.html", blockSize=5, image=False)
+#     print(ext.getContext())

@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import chardet
 import re
 import logging
 import shutil
@@ -60,7 +59,14 @@ def text_merge(path, count):
     loggings.info('text merge complete!')
 
 
-def get_url_to_bs(url, re_count=0):
+def get_url_to_bs(url, re_count=0, ingore=False):
+    """
+    抓取url               返回 BeautifulSoup对象 协议 主域名 不含协议的url链接 状态码
+    :param url:         原始url
+    :param re_count:    最大失败重试计数
+    :param ingore:      忽略错误
+    :return:            BeautifulSoup对象 协议 主域名 不含协议的url链接 状态码
+    """
     headers = {'User-Agent':
                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
                    ' AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
@@ -70,16 +76,19 @@ def get_url_to_bs(url, re_count=0):
     request = urllib.request.Request(url, headers=headers)
     try:
         result = urllib.request.urlopen(request, timeout=15)
+        content = result.read()
     except BaseException as err:
         if re_count > 0:
-            loggings.error('URL ERROR, retry %s' % re_count + str(err))
+            loggings.error('URL read ERROR, retry %s' % re_count + str(err))
             re_count -= 1
             get_url_to_bs(url, re_count)
-        raise err
+        if not ingore:
+            raise err
+        else:
+            return False, None, None, None, None
     else:
-        content = result.read()
         # info = result.info()
-        loggings.info('read original URL complete！')
+        loggings.info('read URL complete！')
         # 获取协议，域名
         protocol, rest = urllib.request.splittype(url)
         domain = urllib.request.splithost(rest)[0]
@@ -91,10 +100,9 @@ def get_url_to_bs(url, re_count=0):
 
 def url_merge(url1, raw_url, protocol):
     """
-    合并成完整URL
-    :param url1: 当前页URL
+    :param url1:    当前页URL
     :param raw_url: 采集到的URL
-    :return:
+    :return:        合并的完整URL
     """
     def protocol_check(url=''):
         url = url.strip('/').strip()
@@ -201,7 +209,6 @@ class Decodes():
         #         count = ''
         # except AttributeError:
         #     pass
-        count = ''
         try:
             with open('.\{}\{:<{}} {}.txt'.format(Down_path, str(count), len(str(page_count)),
                                                  title), 'w', encoding='utf-8') as f:
@@ -236,6 +243,9 @@ def try_mkdir(path):
 
 
 class get_page_links(object):
+    """
+    抓取目录也的章节URL
+    """
     def __init__(self, all_page_url_soup, rest, protocol):
         self.protocol = protocol
         self.soup = all_page_url_soup
@@ -250,6 +260,11 @@ class get_page_links(object):
         self.urllist = self.contentbs.find_all('a')
 
     def special_treatment(self, raw):
+        """
+        特殊处理一些URL标签
+        :param raw:
+        :return:    处理后的内容
+        """
         if re.match('javascript:content', raw):
             url_end = self.rest.split('/')[-1].split('.')
             n1 = re.findall('\d+', raw)
@@ -260,7 +275,7 @@ class get_page_links(object):
         page_rul = []
         for index in self.urllist:
             href_str = index.get('href')
-            title = index.get_text()
+            title = index.get_text().strip()
             if re.match('^javascript:[^content]+|/?class|#|%s' % self.protocol+self.rest, href_str):
                 continue
             if href_str == '':
@@ -274,3 +289,27 @@ class get_page_links(object):
             page_rul[x][0] = link
             x += 1
         return page_rul
+
+class chinese_to_digits(object):
+    """
+    将中文数字转换为 int整数
+    """
+    def __init__(self):
+        self.common_used_numerals = {u'零': 0, u'一': 1, u'二': 2, u'三': 3, u'四': 4, u'五': 5, u'六': 6, u'七': 7, u'八': 8,
+                                u'九': 9, u'十': 10, u'百': 100,
+                                u'千': 1000, u'万': 10000, u'亿': 100000000}
+
+    def run(self, uchars_cn):
+        s=uchars_cn
+        if not s :
+            return 0
+        for i in [u'亿', u'万', u'千', u'百', u'十']:
+            if i in s:
+                ps=s.split(i)
+                lp=self.run(ps[0])
+                if lp==0:
+                    lp=1
+                rp=self.run(ps[1])
+                # print(i,s,lp,rp,'\n')
+                return lp*self.common_used_numerals.get(i, 0)+rp
+        return self.common_used_numerals.get(s[-1], 0)
