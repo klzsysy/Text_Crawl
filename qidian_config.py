@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-
+"""
+来源 http://www.jianshu.com/p/bc6df6a38c66
+"""
 import urllib.request
 import chardet
 import time
@@ -143,4 +145,4 @@ def main(url):
 
 #主函数
 if __name__ == '__main__':
-    main(url = "")
+    main(url="")

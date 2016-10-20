@@ -81,34 +81,51 @@ def get_url_to_bs(url, re_count=0):
         # info = result.info()
         loggings.info('read original URL complete！')
         # 获取协议，域名
-        proto, rest = urllib.request.splittype(url)
+        protocol, rest = urllib.request.splittype(url)
         domain = urllib.request.splithost(rest)[0]
         status_code = result.code
         result.close()
         soup = BeautifulSoup(content, 'html5lib')
-        return soup, proto, domain, rest, status_code
+        return soup, protocol, domain, rest, status_code
 
-def url_merge(url1, url2):
-    url1_segment = url1.strip('/').split('/')
-    url2_segment = url2.strip('/').split('/')
-    n, m, x = 0, 0, 0
-    for u1 in url1_segment[1:]:
-        if url1_segment[-1] == u1 and re.match('\S+\.\S{0,5}', u1):
-            continue
-        for u2 in url2_segment[n:]:
-            if u1 == u2:
-                n += 1      # 成功计数
+
+def url_merge(url1, raw_url, protocol):
+    """
+    合并成完整URL
+    :param url1: 当前页URL
+    :param raw_url: 采集到的URL
+    :return:
+    """
+    def protocol_check(url=''):
+        url = url.strip('/').strip()
+        if not re.match('^https?://', url):
+            return protocol + '://' + url
+        else:return url
+
+    if re.match('^(https?://)?((\w+\.)?\S+?\.\w+){1}/[^\s]+', raw_url):
+        return protocol_check(raw_url)
+    else:
+        url1 = protocol_check(url1)
+        url1_segment = url1.strip('/').split('/')
+        raw_url_segment = raw_url.strip('/').split('/')
+        n, m, x = 0, 0, 0
+        for u1 in url1_segment[1:]:
+            if url1_segment[-1] == u1 and re.match('\S+\.\S{0,5}', u1):
+                continue
+            for u2 in raw_url_segment[n:]:
+                if u1 == u2:
+                    n += 1      # 成功计数
+                    break
+                else:
+                    x += 1      # 失败计数
+                    if n == 0:  # 成功前的失败计数
+                        m += 1
+                    break
+            '''首次成功遇到失败跳出，          首次失败成功后再次失败跳出 x-m=成功后的失败次数'''
+            if (x > 0 and n > 0 and m == 0) or (x - m > 0):           # 成功匹配raw_url第一段
                 break
-            else:
-                x += 1      # 失败计数
-                if n == 0:  # 成功前的失败计数
-                    m += 1
-                break
-        '''首次成功遇到失败跳出，          首次失败成功后再次失败跳出 x-m=成功后的失败次数'''
-        if (x > 0 and n > 0 and m == 0) or (x - m > 0):           # 成功匹配url2第一段
-            break
-    url = '/'.join(url1_segment[:m+1]) + '/' + url2.strip('/')
-    return url
+        url = '/'.join(url1_segment[:m+1]) + '/' + raw_url.strip('/')
+        return url
 
 
 class analysis_title(object):
@@ -216,3 +233,44 @@ def try_mkdir(path):
             loggings.debug("create %s complete" % path)
         except BaseException:
             raise OSError('can not create folder %s' % path)
+
+
+class get_page_links(object):
+    def __init__(self, all_page_url_soup, rest, protocol):
+        self.protocol = protocol
+        self.soup = all_page_url_soup
+        self.rest = rest
+        self.content = self.soup.find_all(id="content")
+        if len(self.content) == 0:
+            self.content = self.soup.find_all(id='chapterlist')
+        if len(self.content) == 0:
+            self.content = self.soup.find('div', re.compile('centent|mainbody|catalog.box'))
+        self.contentbs = BeautifulSoup(str(self.content), 'html5lib')
+
+        self.urllist = self.contentbs.find_all('a')
+
+    def special_treatment(self, raw):
+        if re.match('javascript:content', raw):
+            url_end = self.rest.split('/')[-1].split('.')
+            n1 = re.findall('\d+', raw)
+            return '/{}/{}/{}{}'.format(n1[1], url_end[0], n1[0], '.' + url_end[1])
+        return raw
+
+    def get_href(self):
+        page_rul = []
+        for index in self.urllist:
+            href_str = index.get('href')
+            title = index.get_text()
+            if re.match('^javascript:[^content]+|/?class|#|%s' % self.protocol+self.rest, href_str):
+                continue
+            if href_str == '':
+                continue
+            page_rul.append([self.special_treatment(href_str), title])
+        #   合并函数        原始URL                   要组合的列表
+        end_links = map(url_merge, [self.rest]*len(page_rul), [x[0] for x in page_rul], [self.protocol]*len(page_rul))
+
+        x = 0
+        for link in end_links:
+            page_rul[x][0] = link
+            x += 1
+        return page_rul

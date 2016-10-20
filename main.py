@@ -11,7 +11,7 @@ import threading
 '''最大重试次数'''
 retry_count = 3
 '''目录页URL'''
-html_url = 'http://read.qidian.com/BookReader/9sW8fN_RiY7xq9ZHzk0vMw2.aspx'
+html_url = 'http://www.piaotian.net/html/5/5924/'
 
 
 def extract_url(ori_url):
@@ -21,7 +21,7 @@ def extract_url(ori_url):
     :return:        提取的章节URL 列表
     '''
 
-    soup_text, proto, domain, rest, code = PF.get_url_to_bs(ori_url, re_count=2)
+    soup_text, protocol, domain, rest, code = PF.get_url_to_bs(ori_url, re_count=2)
     # headers = {'User-Agent':
     #     'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
     #     ' AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
@@ -32,7 +32,7 @@ def extract_url(ori_url):
     # info = result.info()
     # loggings.info('read original URL complete！')
     # # 获取协议，域名
-    # proto, rest = urllib.request.splittype(ori_url)
+    # protocol, rest = urllib.request.splittype(ori_url)
     # domain = urllib.request.splithost(rest)[0]
     # result.close()
 
@@ -44,37 +44,38 @@ def extract_url(ori_url):
 
     # soup = BeautifulSoup(content, 'html5lib')
     # soup_text = soup.select('li > a')
-    links = []
-    count = 0
-
-    for tag in soup_text:
-        try:
-            link = tag.attrs.get('href')
-        except BaseException:
-            pass
-        else:
-            if re.match('^javascript|/?class', link):
-                continue
-            if re.match('^\d+\.\S{1,5}$|/\S+\.\S{1,5}$', link):     # '单节数值' 与 '多节组合'
-                merge_link = PF.url_merge(rest, link)
-                links.append([count, proto + '://' + merge_link])
-                count += 1
-                continue
-            if re.match('^(https?://)?((\w+\.)?\S+?\.\w+){1}/[^\s]+', link):    # 非域名URL
-                links.append([count, link])
-                count += 1
+    GET_PAGE_LINKS = PF.get_page_links(soup_text, rest, protocol)
+    all_page_links = GET_PAGE_LINKS.get_href()
+    # links = []
+    # count = 0
+    # for tag in soup_text:
+    #     try:
+    #         link = tag.attrs.get('href')
+    #     except BaseException:
+    #         pass
+    #     else:
+    #         if re.match('^javascript|/?class', link):
+    #             continue
+    #         if re.match('^\d+\.\S{1,5}$|/\S+\.\S{1,5}$', link):     # '单节数值' 与 '多节组合'
+    #             merge_link = PF.url_merge(rest, link)
+    #             links.append([count, protocol + '://' + merge_link])
+    #             count += 1
+    #             continue
+    #         if re.match('^(https?://)?((\w+\.)?\S+?\.\w+){1}/[^\s]+', link):    # 完整URL
+    #             links.append([count, link])
+    #             count += 1
 
                 # print('add:' + link)
     PF.loggings.info('Analysis of original URL success')
     PF.loggings.debug('start get website title...')
 
-    donain_title_text = ''
+    # donain_title_text = ''
 
-    webstie_bs, _, _, _, _ = PF.get_url_to_bs(proto + '://' + domain, re_count=1)
+    webstie_bs, _, _, _, _ = PF.get_url_to_bs(protocol + '://' + domain, re_count=1)
     donain_title_text = webstie_bs.title.get_text()
     # def website_title():
     #     try:
-    #         domain_request = urllib.request.Request(proto + "://" + domain, headers=headers)
+    #         domain_request = urllib.request.Request(protocol + "://" + domain, headers=headers)
     #         domain_result = urllib.request.urlopen(domain_request, timeout=15)
     #         domain_content = domain_result.read()
     #         domain_result.close()
@@ -93,7 +94,7 @@ def extract_url(ori_url):
     #     if status:
     #         break
 
-    return links, count, donain_title_text, domain
+    return all_page_links, len(all_page_links), donain_title_text, domain
 
 
 def process(fx, link_list, retry, domain_title):
@@ -169,11 +170,12 @@ if __name__ == '__main__':
     '''从目录页面提取所有章节URL'''
     links, page_count, domain_title, domain = extract_url(html_url)
     '''多线程处理处理章节URL'''
-    multithreading()
-    # '''单线程处理章节URL列表'''
+    # multithreading()
+
     # process(fx=extract_text, link_list=[[1000, 'http://read.qidian.com/BookReader/9sW8fN_RiY7xq9ZHzk0vMw2,aJRPRNdLgHDwrjbX3WA1AA2.aspx']],
     #         retry=retry_count, domain_title=domain_title)
-    # process(fx=extract_text, link_list=links, retry=retry_count, domain_title=domain_title)
+    # '''单线程处理章节URL列表'''
+    process(fx=extract_text, link_list=links, retry=retry_count, domain_title=domain_title)
     '''合并文本'''
     PF.text_merge(os.path.abspath('.'), count=page_count)
 
