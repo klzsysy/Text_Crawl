@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
-from bs4 import BeautifulSoup
 import re
-import urllib.request
-from public_features import loggings, get_url_to_bs
+from public_features import get_url_to_bs, loggings
 import itertools
 
-
-DBUG   = 0
-reBODY =re.compile( r'<body.*?>([\s\S]*?)<\/body>', re.I)
+DBUG = 0
+reBODY = re.compile( r'<body.*?>([\s\S]*?)<\/body>', re.I)
 reCOMM = r'<!--.*?-->'
 reTRIM = r'<{0}.*?>([\s\S]*?)<\/{0}>'
-reTAG  = r'<[\s\S]*?>|[ \t\r\f\v]'
-reOTH  = r'(&nbsp;)*'
-reIMG  = re.compile(r'<img[\s\S]*?src=[\'|"]([\s\S]*?)[\'|"][\s\S]*?>')
-minimum_effective_value = 100
+reTAG = r'<[\s\S]*?>|[ \t\r\f\v]'
+# reTAG  = r'<[\s\S]*?>|[\t\r\f\v]'     # 保留空格 还有bug
+reOTH = r'(&nbsp;)+'
+relt = r'&lt;'
+regt = r'&gt;'
+reIMG = re.compile(r'<img[\s\S]*?src=[\'|"]([\s\S]*?)[\'|"][\s\S]*?>')
+
 
 class Extractor():
     """
@@ -25,6 +25,7 @@ class Extractor():
         3:针对小说类页面过滤无效内容
             self.body = re.sub(reOTH, '', self.body)
             def processText(self):
+        4:新增了使用递归处理可能出现多段正文的情况
     """
     def __init__(self, html="", blockSize=5, timeout=5, image=False):
         self.html = html
@@ -35,6 +36,21 @@ class Extractor():
         self.ctexts = []
         self.cblocks = []
 
+        self.minimum_effective_value = 100          # 段落最低文本
+        self.text_temp = ''
+        self.store_text = []
+        self.section = 1
+
+    def leave_blank(self):
+        import keyword
+        import builtins
+        k = dict(zip(keyword.kwlist, list(map(lambda x: '{} '.format(x), keyword.kwlist))))
+        b = dict(zip(dir(builtins),  list(map(lambda x: '{} '.format(x), dir(builtins)))))
+        leave_dict = dict(k, **b)
+        def re_sub(t):
+            self.body = re.sub(pattern='^{}'.format(t[0]), repl=t[1], string=self.body, flags=re.M)
+        list(map(re_sub, leave_dict.items()))
+
     def processTags(self):
         self.body = re.sub(reCOMM, "", self.body)
         self.body = re.sub(reTRIM.format("script"), "" ,re.sub(reTRIM.format("style"), "", self.body))
@@ -42,13 +58,16 @@ class Extractor():
         self.body = re.sub(reTAG, "", self.body)
         self.body = re.sub(reOTH, '', self.body)
 
-    def processBlocks(self):
-        self.ctexts   = self.body.split("\n")
-        self.textLens = [len(text) for text in self.ctexts]
+        # r'(&gt;)+' *次重复会导致0次匹配也成功的问题, 适用于有代码页面
+        self.body = re.sub(relt, '<', self.body)
+        self.body = re.sub(regt, '>', self.body)
+        # self.leave_blank()
 
-        if max(self.textLens) <= minimum_effective_value:
+    def processBlocks(self, recursion=False):
+        self.textLens = [len(text) for text in self.ctexts]
+        if max(self.textLens) <= self.minimum_effective_value:       # 文本段没有达到预定义的长度
             return None
-        self.cblocks  = [0]*(len(self.ctexts) - self.blockSize - 1)
+        self.cblocks  = [0]*(len(self.ctexts) - self.blockSize - 1)     #
         lines = len(self.ctexts)
         for i in range(self.blockSize):
             self.cblocks = list(map(lambda x,y: x+y, self.textLens[i: lines-1-self.blockSize+i], self.cblocks))
@@ -66,12 +85,23 @@ class Extractor():
         except BaseException:
             return None
 
-        return "\n".join(self.ctexts[self.start:self.end]).strip()
+        '''尝试再次获取有效文本，针对有多段有效文本的情况'''
+        self.text_temp = "\n".join(self.ctexts[self.start:self.end]).strip()
+        if not recursion:                                               # 第一次分析 获得本次字符串长度
+            self.section = len(self.text_temp)
+        else:                                                           # 非第一次的递归操作
+            if len(self.text_temp) < int(self.section / 2):             # 本次字符串长度小于第一次的一半则忽略
+                return None
+        self.store_text.append([self.start, self.text_temp])            # 收集有效的段落
+        self.ctexts = self.ctexts[:self.start] + self.ctexts[self.end:] # 删除已提取的段落
+        self.processBlocks(recursion=True)                              # 开始递归操作
+        return self.store_text
+
 
     def processImages(self):
         self.body = reIMG.sub(r'{{\1}}', self.body)
 
-    def processText(self):
+    def del_invalid_text(self):
         """删除特定组合的内容"""
         lists = ("（快捷键←）",
                  "上一章", "返回目录", "加入书签", "推荐本书", "返回书页", "下一章", "（快捷键→）",
@@ -90,10 +120,11 @@ class Extractor():
                             ass += 1
                     if ass >= 3:
                         return self.text.index(x)
-            return -1
+            return None     # 无匹配
         '''在匹配到上诉三个关键词的行截尾'''
-        self.text = self.text[:iter_text(self)].strip()
-
+        i = iter_text(self)
+        if i:
+            self.text = self.text[:i].strip()
 
     def getContext(self):
         self.rawPage = self.html
@@ -106,14 +137,16 @@ class Extractor():
         if self.saveImage:
             self.processImages()
         self.processTags()
+        self.ctexts = self.body.split("\n")
         self.text = self.processBlocks()
         if self.text is None:
             return None
-        self.processText()
-        if len(self.text) < minimum_effective_value:
+        # 排序并组合二维列表
+        self.text = '\n\n#---------------\n\n'.join(y[1] for y in sorted(self.text, key=lambda x: x[0]))
+        self.del_invalid_text()
+        if len(self.text) < self.minimum_effective_value:
             return None
-        else:
-            return self.text
+        return self.text
 
 
 def extract_text(page_link, page_tiele, retey=0):
@@ -122,44 +155,25 @@ def extract_text(page_link, page_tiele, retey=0):
     :param page_link:
     :return: UTF-8编码的字符串
     '''
-    # headers = {'User-Agent':
-    #                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-    #                'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
-    #            }
-    # request = urllib.request.Request(page_link, headers=headers)
-    # page_get = urllib.request.urlopen(request, timeout=10)
-    # page_read = page_get.read()
-    # page_get.close()
-    # loggings.debug('%s Read complete!' % page_link)
-    #
-    # '''
-    # html5lib:       最好的容错性,以浏览器的方式解析文档,生成HTML5格式的文档,速度慢
-    # html.parser:    Python的内置标准库,执行速度适中,文档容错能力强
-    # lxml:           速度快,文档容错能力强
-    # '''
-    # page_soup = BeautifulSoup(page_read, 'html5lib')
-    # '''获取标题'''
-    # title = page_soup.title.get_text()
-    # '''分析提取标题'''
-    # analysis = analysis_title(title, domain_title)
-    # title_analysis = analysis.score()
-    loggings.debug('start read %s' % page_tiele)
-    page_soup, _, _, _, _ = get_url_to_bs(page_link, re_count=retey, ingore=True)
-    if page_soup is False:
-        loggings.error('% %s read time fail')
-        return False
-    loggings.debug('%s Read complete!' % page_tiele)
+
+    loggings.debug('Start Read %s' % page_link + page_tiele)
+    page_soup, _, _, _, _ = get_url_to_bs(page_link, re_count=retey)
+    get_page_tiele = page_soup.title.get_text()
+    if page_tiele == '':
+        page_tiele = get_page_tiele
+
+    loggings.debug('Read Complete [%s]' % page_tiele)
 
     ext = Extractor(html=str(page_soup))
-    loggings.info('start filter page text')
+    loggings.info('Start trying to filter the page text [%s]' % page_tiele)
     text = ext.getContext()
 
     if text is None:
-        loggings.warning('%s 没有有效的文本可供提取，可能是无效页面或者确认请求的站点是否需要登录' % page_tiele)
-        return None
-    loggings.info('filter page text complete')
+        raise IndexError('No valid text to extract, possibly invalid pages, '
+                         'or to confirm that a requested site needs to log in. [%s]' % page_tiele)
+
+    loggings.debug('Page text filtering is complete [%s]' % page_tiele)
     text = page_tiele + '\n\n' + text
     """编码转换 极为重要，编码成utf-8后解码utf-8 并忽略错误的内容"""
     text = text.encode('utf-8').decode('utf-8', 'ignore')
-    return text
-
+    return text, page_tiele

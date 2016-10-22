@@ -45,4 +45,4 @@ Temporary Items
 .idea
 __pycache__
 down_text
-.txt
+*.txt

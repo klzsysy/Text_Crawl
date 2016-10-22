@@ -8,14 +8,15 @@ import time
 import random
 from bs4 import BeautifulSoup as bs
 import os
-from public_features import loggings, Down_path, try_mkdir
+from public_features import down_path, try_mkdir, loggings
+
 ISOTIMEFORMAT='%Y-%m-%d %X'
 
-save_path = os.path.join('.', Down_path)
+save_path = os.path.join('.', down_path)
 #通用装饰器1
 def writeBook(func):
     def swr(*args,**kw):
-        f = open(os.path.join(save_path, args[-1] + '.md'), 'a', encoding='utf-8')
+        f = open(os.path.join(save_path, args[-1] + '.txt'), 'a', encoding='utf-8')
         f.write('\n\n')
         result = func(*args, **kw)
         f.write('>')
@@ -47,7 +48,8 @@ def writeZhangjie2(menuContentBs, bookName,i):
     menuZhangJieHrefList = getHref(menuZhangJieHref)
     writeZhangjieDetail(menuZhangJieSpan, bookName,menuZhangJieHrefList)
 
-#写章节细节和每章内容的方法(还有点问题)
+# 写章节细节和每章内容的方法(还有点问题)
+
 def writeZhangjieDetail(menuZhangJieSpan, bookName,menuZhangJieHrefList):
     j = 0
     for spanValue in menuZhangJieSpan:
@@ -79,12 +81,12 @@ def writeZhangjieDetail(menuZhangJieSpan, bookName,menuZhangJieHrefList):
                 .replace("<p>　　", "  \n\n").replace("</p>", "").replace("')","")\
                 .replace('<a href="http://www.qidian.com">起点'
                          '中文网 www.qidian.com 欢迎广大书友光临阅读，最新、最快、最火的连载作品'
-                         '尽在起点原创！</a><a>手机用户请到m.qidian.com阅读。</a>',"---来自DZG")\
+                         '尽在起点原创！</a><a>手机用户请到m.qidian.com阅读。</a>',"---")\
                 .replace('<ahref=http: www.qidian.com="">起点'
                          '中文网www.qidian.com欢迎广大书友光临阅读，最新、最快、最火的连载作品'
-                         '尽在起点原创！</ahref=http:><a>手机用户请到m.qidian.com阅读。</a>',"---来自DZG")\
+                         '尽在起点原创！</ahref=http:><a>手机用户请到m.qidian.com阅读。</a>',"---")\
                 .replace("起点中文网www.qidian.com欢迎广大书友光临阅读，最新、最快、最火的连载作品"
-                         "尽在起点原创！</a><a>手机用户请到m.qidian.com阅读。</a></a>","---来自DZG")\
+                         "尽在起点原创！</a><a>手机用户请到m.qidian.com阅读。</a></a>","---")\
                 .replace("http://www.qidian.com","http://www.jianshu.com/users/6ca20b30c14c")
             f.write(fileArticle)
         except:
@@ -142,7 +144,3 @@ def main(url):
     #soup2 = bs(str(menu),'html.parser')                       #转换为bs对象
 
     loggings.info('结束：' + str(time.strftime( ISOTIMEFORMAT, time.localtime() )))
-
-#主函数
-if __name__ == '__main__':
-    main(url="")
