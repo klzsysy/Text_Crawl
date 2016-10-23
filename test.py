@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+"""
+用来测试各种函数及想法
+"""
 import requests as req
 import re
 
@@ -70,6 +73,17 @@ class chinese_to_digits(object):
 
 # c2d = chinese_to_digits()
 # print(c2d.run('第三十三章'))
+
+###
+def reserved_format(self):
+    import keyword
+    import builtins
+    k = dict(zip(keyword.kwlist, list(map(lambda x: '{} '.format(x), keyword.kwlist))))
+    b = dict(zip(dir(builtins),  list(map(lambda x: '{} '.format(x), dir(builtins)))))
+    leave_dict = dict(k, **b)
+    def re_sub(t):
+        self.body = re.sub(pattern='^{}'.format(t[0]), repl=t[1], string=self.body, flags=re.M)
+    list(map(re_sub, leave_dict.items()))
 
 
 # ----------------------------------------
@@ -172,7 +186,7 @@ class chinese_to_digits(object):
 #     print(ext.getContext())
 
 # ----------------------------------------
-
+#
 def img(x=[]):
     len_x = len(x)  # x轴长度
     len_y = max(x)  # y轴长度
@@ -199,6 +213,8 @@ def img(x=[]):
     for x in y_x:
         print(x)
 
+import matplotlib.pyplot as pyplot
+
 
 k = 5
 c_texts = '<span \nclass="n">\n&lt;module&gt\n;</span><span class="st\n">感覺閾\n' \
@@ -222,7 +238,53 @@ lines = len(c_texts)
 c_block = []
 c_texts_lens = [len(x) for x in c_texts]        # 每行的长度
 for x in range(len(c_texts) - k + 1):
-    # print([len(y) for y in c_texts[x:x+k]])
     c_block.append(sum([len(y) for y in c_texts[x:x+k]]))
 
-img(c_block)
+max_block = max(c_block)                    # 最大的块
+start = end = c_block.index(max_block)      # 定位最大的块
+
+while start >= 0 and c_block[start] > min(c_block):
+    start -= 1
+while end < len(c_block) - 1 and c_block[end] > min(c_block):
+    end += 1
+
+re_text = '\n'.join(c_texts[start + k: end + k - 1])
+# ----------------------------------------
+
+# pyplot.plot(c_block)
+# pyplot.ylabel('test')
+# pyplot.show()
+
+import multiprocessing
+
+def read(que):
+    mu_list = {}
+    n = 0
+    while True:
+        value = que.get(block=True)
+        if value == None:
+            break
+        print(value)
+        mu_list[str(n)] = multiprocessing.Process(target=draw, args=(value,))
+        mu_list[str(n)].daemon = False
+        start = mu_list[str(n)]
+        start.start()
+        n += 1
+
+def draw(c_blocks):
+    pyplot.plot(c_blocks)
+    pyplot.ylabel('c_block data')
+    pyplot.show()
+
+if __name__=='__main__':
+    q = multiprocessing.Queue()
+    # q = queue.Queue()
+    mu = multiprocessing.Process(target=read, args=(q,))
+    mu.start()
+
+    a = [2,3,4,5,7,8,55,3,4,5,66,4,4]
+    b = [22,33,4,25,17,8,55,3,4,5,66,14,4]
+    q.put(a)
+    q.put(b)
+    q.put(None)
+

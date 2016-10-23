@@ -1,172 +1,203 @@
 # -*- coding: utf-8 -*-
 import re
-from public_features import get_url_to_bs, loggings
+from public_features import get_url_to_bs, loggings, draw_processing
 import itertools
+import time
 
-DBUG = 0
-reBODY = re.compile( r'<body.*?>([\s\S]*?)<\/body>', re.I)
-reCOMM = r'<!--.*?-->'
-reTRIM = r'<{0}.*?>([\s\S]*?)<\/{0}>'
-reTAG = r'<[\s\S]*?>|[ \t\r\f\v]'
-# reTAG  = r'<[\s\S]*?>|[\t\r\f\v]'     # 保留空格 还有bug
-reOTH = r'(&nbsp;)+'
-relt = r'&lt;'
-regt = r'&gt;'
-reIMG = re.compile(r'<img[\s\S]*?src=[\'|"]([\s\S]*?)[\'|"][\s\S]*?>')
-
-
-class Extractor():
+class extract():
     """
-    https://github.com/rainyear/cix-extractor-py
-    基于行块分布函数的通用网页正文（及图片）抽取
-    有修改:
-        1:变更了网页抓取与解析压缩方式，解决乱码问题，使用了BeautifulSoup模块进行解析与格式化html内容
-        2:对存在报错的位置进行了处理
+    通过《基于行块分布函数的通用网页正文抽取算法》实现
+    有变动:
+        1:直接取了分布函数最高点，然后向前后推进确定起始与结束点
         3:针对小说类页面过滤无效内容
             self.body = re.sub(reOTH, '', self.body)
             def processText(self):
         4:新增了使用递归处理可能出现多段正文的情况
     """
-    def __init__(self, html="", blockSize=5, timeout=5, image=False):
-        self.html = html
-        self.blockSize = blockSize
-        self.timeout = timeout
-        self.saveImage = image
-        self.rawPage = ""
-        self.ctexts = []
-        self.cblocks = []
+    def __init__(self, html="", block_size=4, image=False, leave_blank=True, drawing=True, repeat=False):
+        """
+        :param html:                html文档
+        :param block_size:          文本块大小， 越小越严格，越大越宽松
+        :param image:               留下图片url
+        :param leave_blank:         保留文字中的空格
+        :param map:                 绘制文本分布函数图
+        """
 
+        self.reBODY = re.compile(r'<body.*?>([\s\S]*?)<\/body>', re.I)
+        self.reCOMM = r'<!--.*?-->'
+        self.reTRIM = r'<{0}.*?>([\s\S]*?)<\/{0}>'
+        if leave_blank:
+            self.reTAG = r'<[\s\S]*?>|[\t\r\f\v]'  # 保留空格
+        else:
+            self.reTAG = r'<[\s\S]*?>|[ \t\r\f\v]'  # 删除所有空格
+        self.respa = r'(&nbsp;)+'
+        self.relt = r'&lt;'
+        self.regt = r'&gt;'
+        self.reIMG = re.compile(r'<img[\s\S]*?src=[\'|"]([\s\S]*?)[\'|"][\s\S]*?>')
+
+        self.html = html
+        self.blocks_size = block_size
+        self.save_image = image
+        self.raw_page = ""
+        self.c_texts = []
         self.minimum_effective_value = 100          # 段落最低文本
-        self.text_temp = ''
         self.store_text = []
         self.section = 1
+        self.leave_blank = leave_blank
+        self.drawing = drawing
+        self.repeat = repeat
+        print(self.blocks_size, self.save_image,self.leave_blank, self.drawing)
+        if self.drawing:
+            self.Draw = draw_processing()
 
-    def leave_blank(self):
-        import keyword
-        import builtins
-        k = dict(zip(keyword.kwlist, list(map(lambda x: '{} '.format(x), keyword.kwlist))))
-        b = dict(zip(dir(builtins),  list(map(lambda x: '{} '.format(x), dir(builtins)))))
-        leave_dict = dict(k, **b)
-        def re_sub(t):
-            self.body = re.sub(pattern='^{}'.format(t[0]), repl=t[1], string=self.body, flags=re.M)
-        list(map(re_sub, leave_dict.items()))
-
-    def processTags(self):
-        self.body = re.sub(reCOMM, "", self.body)
-        self.body = re.sub(reTRIM.format("script"), "" ,re.sub(reTRIM.format("style"), "", self.body))
+    def tags_process(self,):
+        self.body = re.sub(self.reCOMM, "", self.body)
+        self.body = re.sub(self.reTRIM.format("script"), "", re.sub(self.reTRIM.format("style"), "", self.body))
         # self.body = re.sub(r"[\n]+","\n", re.sub(reTAG, "", self.body))
-        self.body = re.sub(reTAG, "", self.body)
-        self.body = re.sub(reOTH, '', self.body)
-
+        self.body = re.sub(self.reTAG, "", self.body)
+        self.body = re.sub(self.respa, '', self.body)
         # r'(&gt;)+' *次重复会导致0次匹配也成功的问题, 适用于有代码页面
-        self.body = re.sub(relt, '<', self.body)
-        self.body = re.sub(regt, '>', self.body)
-        # self.leave_blank()
+        self.body = re.sub(self.relt, '<', self.body)
+        self.body = re.sub(self.regt, '>', self.body)
+        # 替换空白行为空
+        while self.leave_blank:
+            self.body, n = re.subn(r'\n +\n', '\n\n', self.body)
+            loggings.debug('del ... %s' % str(n))
+            if n == 0:break
 
-    def processBlocks(self, recursion=False):
-        self.textLens = [len(text) for text in self.ctexts]
-        if max(self.textLens) <= self.minimum_effective_value:       # 文本段没有达到预定义的长度
+    def blocks_process(self, recursion=False):
+        '''
+        打开show_block_function可查看曲线图, 在断点bug的情况下可能无法显示图形，原因不明。
+        :param recursion:   是否是尝试抓取第二段
+        :return:            返回抽取的文本
+        '''
+        self.c_blocks = []
+        self.c_texts_length = [len(x) for x in self.c_texts]
+        '''生成块列表'''
+        for x in range(len(self.c_texts) - self.blocks_size + 1):
+            self.c_blocks.append(sum([len(y) for y in self.c_texts[x:x + self.blocks_size]]))
+        # 最大的文本段没有达到预定义的长度 太短抛弃
+        if max(self.c_texts_length) <= self.minimum_effective_value:
+            loggings.debug('文本长度小于预设值{}，被抛弃:\n{}\n{}\n{}'.format(self.minimum_effective_value, '-'*40,
+                            self.c_texts[self.c_texts_length.index(max(self.c_texts_length))], '-' * 40))
             return None
-        self.cblocks  = [0]*(len(self.ctexts) - self.blockSize - 1)     #
-        lines = len(self.ctexts)
-        for i in range(self.blockSize):
-            self.cblocks = list(map(lambda x,y: x+y, self.textLens[i: lines-1-self.blockSize+i], self.cblocks))
 
-        maxTextLen = max(self.cblocks)
-
-        if DBUG: print(maxTextLen)
-
-        self.start = self.end = self.cblocks.index(maxTextLen)
-        while self.start > 0 and self.cblocks[self.start] > min(self.textLens):
+        '''函数分布图的最高点'''
+        max_block = max(self.c_blocks)
+        self.start = self.end = self.c_blocks.index(max_block)
+        """
+        这里start与end点是大于行块的最小值。
+        point > N，通常这个最小值是0（空行就是0），增大N将会过滤掉长度小于N的行
+        """
+        self.N = min(self.c_blocks)
+        while self.start >= 0 and self.c_blocks[self.start] > self.N:
             self.start -= 1
-        try:
-            while self.end < lines - self.blockSize and self.cblocks[self.end] > min(self.textLens):
-                self.end += 1
-        except BaseException:
-            return None
+
+        while self.end < len(self.c_blocks) - 1 and self.c_blocks[self.end] > self.N:
+            self.end += 1
+
+        self._text = '\n'.join(self.c_texts[self.start + self.blocks_size: self.end])
+
+        if self.drawing:self.Draw.put(self.c_blocks)    # 画图
 
         '''尝试再次获取有效文本，针对有多段有效文本的情况'''
-        self.text_temp = "\n".join(self.ctexts[self.start:self.end]).strip()
-        if not recursion:                                               # 第一次分析 获得本次字符串长度
-            self.section = len(self.text_temp)
-        else:                                                           # 非第一次的递归操作
-            if len(self.text_temp) < int(self.section / 2):             # 本次字符串长度小于第一次的一半则忽略
+        if not recursion:                                           # 第一次分析 获得本次字符串长度
+            self.section = len(self._text)
+        else:                                                       # 非第一次的递归操作
+            loggings.debug('再次分析完成')
+            if len(self._text) < int(self.section / 2):             # 本次字符串长度小于第一次的一半则忽略
+                loggings.debug('本次分析达不到预定义的要求，抛弃如下内容:\n{}\n{}\n{}'.format('-'*60, self._text, '-' * 60))
                 return None
-        self.store_text.append([self.start, self.text_temp])            # 收集有效的段落
-        self.ctexts = self.ctexts[:self.start] + self.ctexts[self.end:] # 删除已提取的段落
-        self.processBlocks(recursion=True)                              # 开始递归操作
+        self.store_text.append([self.start, self._text])            # 收集有效的段落
+        # 删除已提取的段落
+        self.c_texts = self.c_texts[:self.start + self.blocks_size] + self.c_texts[self.end:]
+        # 开始递归操作,查找符合调节的第二段文本
+        if self.repeat:self.blocks_process(recursion=True)
         return self.store_text
 
-
-    def processImages(self):
-        self.body = reIMG.sub(r'{{\1}}', self.body)
-
     def del_invalid_text(self):
-        """删除特定组合的内容"""
+        """删除特定组合的内容 解决一些靠分布算法不好搞的内容"""
         lists = ("（快捷键←）",
                  "上一章", "返回目录", "加入书签", "推荐本书", "返回书页", "下一章", "（快捷键→）",
                  "投推", "荐票", "回目录", "标记", "书签","登陆", "注册",'新用户', 'FAQ', '道具', '商城', '每日任务',
-                 '咨询','投诉', '举报'
+                 '咨询', '投诉', '举报'
                  )
-        self.f = self.text.split('\n')
+        self.f = self.finally_text.split('\n')
+        index = []
 
         def iter_text(self):
             """定位到单行内成功匹配三个关键字的行index值"""
-            for i in itertools.combinations(lists, r=3):
-                ass = 0
-                for x in self.f:
+            for x in self.f:
+                for i in itertools.combinations(lists, r=3):
+                    ass = 0
                     for ii in i:
                         if ii in x:
                             ass += 1
                     if ass >= 3:
-                        return self.text.index(x)
-            return None     # 无匹配
-        '''在匹配到上诉三个关键词的行截尾'''
-        i = iter_text(self)
-        if i:
-            self.text = self.text[:i].strip()
+                        index.append(self.finally_text.index(x))
+                        break
 
-    def getContext(self):
-        self.rawPage = self.html
+        '''在匹配到上诉三个关键词的行截断首尾'''
+        iter_text(self)
+        if len(index) == 1 and index[0] > len(self.finally_text) / 2:
+            self.finally_text = self.finally_text[:index[0]].strip()
+        if len(index) >= 2:
+            start = max(x for x in index if x < len(self.finally_text) / 2)
+            end   = min(y for y in index if y > len(self.finally_text) / 2)
+            self.finally_text = self.finally_text[start:end]
+
+    def crawl_context(self):
+        self.raw_page = self.html
         try:
-            self.body = re.findall(reBODY, self.rawPage)[0]
+            self.body = re.findall(self.reBODY, self.raw_page)[0]
         except BaseException:
-            self.body = self.rawPage
-        if DBUG: print(self.rawPage)
+            # 某些body异常的网页
+            self.body = self.raw_page
 
-        if self.saveImage:
-            self.processImages()
-        self.processTags()
-        self.ctexts = self.body.split("\n")
-        self.text = self.processBlocks()
+        if self.save_image: self.body = self.reIMG.sub(r'{{\1}}', self.body)
+        self.tags_process()
+        self.c_texts = self.body.split("\n")
+        self.text = self.blocks_process()
+
         if self.text is None:
             return None
-        # 排序并组合二维列表
-        self.text = '\n\n#---------------\n\n'.join(y[1] for y in sorted(self.text, key=lambda x: x[0]))
+        # 排序并组合二维列表为字符串
+        self.finally_text = '\n\n# ---------------\n\n'.join(y[1] for y in sorted(self.text, key=lambda x: x[0]))
         self.del_invalid_text()
-        if len(self.text) < self.minimum_effective_value:
-            return None
-        return self.text
+
+        if self.drawing:
+            time.sleep(1)
+            self.Draw.put(None)                         # 确保绘图子进程结束后主线程可以退出
+            loggings.debug('多线程绘图进程已结束')
+
+        return self.finally_text
 
 
-def extract_text(page_link, page_tiele, retey=0):
+# ======================================================================================================================
+#  extract_text 作为抓取文本的入口，提供URL等信息
+# ======================================================================================================================
+
+
+def extract_text(page_link, page_tiele, args=None):
     '''
     请求URL并提取主要文本
     :param page_link:
-    :return: UTF-8编码的字符串
+    :return: UTF-8编码的字符串和页面标题
     '''
 
     loggings.debug('Start Read %s' % page_link + page_tiele)
-    page_soup, _, _, _, _ = get_url_to_bs(page_link, re_count=retey)
+    page_soup, _, _, _, _ = get_url_to_bs(page_link, re_count=args.retry)
     get_page_tiele = page_soup.title.get_text()
     if page_tiele == '':
         page_tiele = get_page_tiele
 
     loggings.debug('Read Complete [%s]' % page_tiele)
 
-    ext = Extractor(html=str(page_soup))
+    ext = extract(html=str(page_soup), block_size=args.block_size,
+                  leave_blank=args.leave_blank, drawing=args.drawing)
+
     loggings.info('Start trying to filter the page text [%s]' % page_tiele)
-    text = ext.getContext()
+    text = ext.crawl_context()
 
     if text is None:
         raise IndexError('No valid text to extract, possibly invalid pages, '

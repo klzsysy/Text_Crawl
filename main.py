@@ -8,14 +8,18 @@ import threading
 import copy
 import argparse
 
-# 最大重试次数
-retry_count = 3
+
+
 # 目录页URL
 html_url = 'http://www.piaotian.net/html/5/5924/'
 
-ide_debug = '-s http://docs.python-requests.org/zh_CN/latest/user/quickstart.html'
+ide_debug = '-s http://bbs.northernbbs.com/thread-670859-1-1.html'
 
-def extract_url(ori_url):
+Error_url = ['']
+Unable_write = ['']
+
+
+def extract_url(ori_url, retry=0):
     """
     提取目录页的有效URL，抓取网站title
     :param ori_url: 目录页URL
@@ -23,14 +27,14 @@ def extract_url(ori_url):
     """
     PF.loggings.debug('Open original url %s' % ori_url)
     try:
-        soup_text, protocol, domain, rest, code = PF.get_url_to_bs(ori_url, re_count=retry_count)
+        soup_text, protocol, ori_domain, rest, code = PF.get_url_to_bs(ori_url, re_count=retry)
     except BaseException as err:
         PF.loggings.error(str(err))
         PF.loggings.debug('Script Exit')
         sys.exit(-1)
     else:
         PF.loggings.debug('Open original url complete！')
-        if 'qidian.com' in domain:
+        if 'qidian.com' in ori_domain:
             import qidian_config
             PF.loggings.info('Use "qidian" Configure')
             qidian_config.main(ori_url)
@@ -80,10 +84,10 @@ def extract_url(ori_url):
             all_page_links = sorted(all_page_links, key=lambda x: x[-1])
 
         PF.loggings.debug('The article list sort is complete')
-        return all_page_links, len(all_page_links), domain
+        return all_page_links, len(all_page_links), ori_domain
 
 
-def process(fx, link_list, retry):
+def process(fx, link_list, var_args=None):
     """
     :param fx:          提取文本
     :param link_list:   页面URL总列表
@@ -97,9 +101,9 @@ def process(fx, link_list, retry):
         title = pop[1]               # title
         count = pop[2]
         try:
-            page_text, title = fx(link, title, retry)
+            page_text, title = fx(link, title, var_args)
         except BaseException as err:
-            PF.loggings.error('URL{} requests failed, {} {} {}'.format(retry, title, link, str(err)))
+            PF.loggings.error('URL{} requests failed, {} {} {}'.format(var_args.retry, title, link, str(err)))
             Error_url.append('requests failed ' + ' '.join([str(count), title, link, str(err)]))
         else:
             wr = PF.write_text(count, title, page_text, page_count)
@@ -115,10 +119,9 @@ def multithreading():
         def __init__(self):
             threading.Thread.__init__(self)
             self.daemon = True
-            self.retry_count = retry_count
 
         def run(self):
-            process(extract_text, links, self.retry_count)
+            process(extract_text, links, var_args=args)
 
     mu_list = []
     for num in range(os.cpu_count()*2):
@@ -148,33 +151,38 @@ def args_parser():
     parse_url_group.add_argument('-s', metavar='single url', nargs=1, type=str, action=UrlAction,
                                  help='文本页面URL, 抓取单一url的文本内容')
     ''''''
-    parse.add_argument('-r', nargs=1, type=int, choices=range(0, 8), default=[retry_count], help='最大请求失败重试次数')
+    parse.add_argument('-r', nargs=1, dest='retry', type=int, choices=range(0, 8), default=3, help='最大请求失败重试次数')
 
-    parse.add_argument('--debug', nargs=1, type=int, choices=range(0, 4), default=[1],
+    parse.add_argument('-b', dest='block_size', type=int, choices=range(2, 10), default=5, help='文本行块分布函数块大小')
+
+    parse.add_argument('-debug', nargs=1, type=int, choices=range(0, 4), default=1,
                        help='debug功能，0关闭，1输出到控制台，2输出到文件，3同时输出')
 
-    parse.add_argument('--version', action='version', version='%(prog)s 0.4', help='显示版本号')
-    args_ = parse.parse_args(ide_debug.split())
-    args_.r = args_.r[0]
-    args_.debug = args_.debug[0]
-    # print(args)
-    return args_
+    switch_group = parse.add_argument_group(title='额外选项', description='打开或关闭对应功能')
+    switch_group.add_argument('--drawing', action='store_const', const=True, default=False, help='绘制文本分布函数图')
+    switch_group.add_argument('--delete-blank', dest='leave_blank', action='store_const', const=False,
+                              default=True, help='删除文本中的空格，默认保留')
+    switch_group.add_argument('--save-image', dest='image',action='store_const', const=True, default=False,
+                              help='保留正文中的图片链接')
+    switch_group.add_argument('--repeat', action='store_const', const=True, default=False,
+                              help='启用循环过滤，默认关闭，只进行一次过滤')
 
+    parse.add_argument('--version', action='version', version='%(prog)s 0.4', help='显示版本号')
+    args_ = parse.parse_args()
+    if args_.c is not None:args_.drawing = False
+    print(args_)
+    return args_
 
 if __name__ == '__main__':
     args = args_parser()
-    Error_url = ['']
-    Unable_write = ['']
-
-    retry_count = args.r
     PF.init_logs(PF.loggings, args.debug)
 
     if args.s:
         page_count = 1
-        process(fx=extract_text, link_list=[[html_url, '', 1000]], retry=retry_count)
+        process(fx=extract_text, link_list=[[html_url, '', 1000]], var_args=args)
     else:
         '''从目录页面提取所有章节URL'''
-        links, page_count, domain = extract_url(html_url)
+        links, page_count, domain = extract_url(html_url, retry=args.retry)
         PF.loggings.debug('chapter processing starts  ')
         '''多线程处理处理章节URL'''
         multithreading()
@@ -187,12 +195,11 @@ if __name__ == '__main__':
         PF.loggings.debug('script complete, Everything OK!')
         sys.exit(0)
     PF.loggings.debug('script complete, EBut there are some errors :(')
-
     try:
         terminal_size = os.get_terminal_size().columns - 1
     except BaseException:
         terminal_size = 70
-    PF.loggings.info('\n\n\n{}\n{}Error total:\n{}'.format('+'*terminal_size, ' ' * int(terminal_size / 2 - 5),
-                                                           '+'*terminal_size))
+    PF.loggings.info('\n\n\n{}\n{}Error total:\n{}'.format('+' * terminal_size, ' ' * int(terminal_size / 2 - 5),
+                                                           '+' * terminal_size))
     PF.loggings.info('# '.join(Error_url) + '# '.join(Unable_write))
     sys.exit(1)

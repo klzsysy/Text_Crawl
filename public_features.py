@@ -7,11 +7,12 @@ import fnmatch
 import urllib.request
 from bs4 import BeautifulSoup
 import requests
+import multiprocessing
+import matplotlib.pyplot as pyplot
 
 
 # 下载目录
 down_path = 'down_text'
-
 
 def init_logs(logs, lev=1):
     '''
@@ -88,15 +89,10 @@ def get_url_to_bs(url, re_count=0, ignore=False):
                }
     if not re.match('^https?://', url):
         url = 'http://' + url
-    # request = urllib.request.Request(url, headers=headers)
     try:
-        # result = urllib.request.urlopen(request, timeout=10)
-        # content = result.read()
         r = requests.get(url, headers=headers, timeout=10, allow_redirects=False)
-
         loggings.debug(r.request.headers)
         status_code = r.status_code
-
         content = r.content
         if not ignore and not (310 > status_code >= 200):
             r.close()
@@ -111,7 +107,6 @@ def get_url_to_bs(url, re_count=0, ignore=False):
         else:
             return False, None, None, None, None
     else:
-        # info = result.info()
         loggings.debug('Read Cpmplete [%s]' % url)
         # 获取协议，域名
         protocol, rest = urllib.request.splittype(url)
@@ -258,3 +253,38 @@ class chinese_to_digits(object):
                 # print(i,s,lp,rp,'\n')
                 return lp*self.common_used_numerals.get(i, 0)+rp
         return self.common_used_numerals.get(s[-1], 0)
+
+
+class draw_processing(object):
+    """
+    多进程模式画出字块分布函数图
+    提供数组
+    """
+    def __init__(self):
+        self.mu_list = {}
+        self.n = 0
+        self.queue = multiprocessing.Queue()
+        self.mu = multiprocessing.Process(target=self.work, args=(self.queue,))
+        self.mu.start()
+        loggings.debug('多线程绘图进程已启动...')
+
+    def draw(self, c_blocks, name='test'):
+        pyplot.plot(c_blocks)
+        # pyplot.ylabel(name)
+        pyplot.title(name)
+        pyplot.show()
+
+    def work(self, q):
+        while True:
+            value = q.get(block=True)
+            if value is None:
+                break
+            title = 'The {}th text distribution function'.format(str(self.n+1))
+            self.mu_list[str(self.n)] = multiprocessing.Process(target=self.draw, args=(value, title))
+            self.mu_list[str(self.n)].daemon = False        # False保证主线程不会结束
+            start = self.mu_list[str(self.n)]
+            start.start()
+            self.n += 1
+
+    def put(self, sequence):
+        self.queue.put(sequence)
