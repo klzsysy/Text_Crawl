@@ -8,8 +8,14 @@ import urllib.request
 from bs4 import BeautifulSoup
 import requests
 import multiprocessing
-import matplotlib.pyplot as pyplot
-
+try:
+    import matplotlib.pyplot as pyplot
+except ImportError:
+    print('无法导入matplotlib模块，绘图功能将无法使用\n安装：>pip install matplotlib\n'
+          '或者直接访问下载地址手动安装 https://pypi.python.org/pypi/matplotlib\n')
+    mat_import = True
+else:
+    mat_import = False
 
 # 下载目录
 down_path = 'down_text'
@@ -25,7 +31,7 @@ def init_logs(logs, lev=1):
     if lev is 2 or lev is 3:
         logs.setLevel(logging.DEBUG)
         try:
-            out_file = logging.FileHandler(filename='run_logs.txt', encoding='utf8')
+            out_file = logging.FileHandler(filename='run_logs.log', encoding='utf8')
         except IOError:
             lev = 1
             e = True
@@ -74,10 +80,9 @@ def text_merge(path, count):
     loggings.debug('Text merged successfully:[%s]' % os.path.join(path, 'text_merge.txt'))
 
 
-
 def get_url_to_bs(url, re_count=0, ignore=False):
     """
-    抓取url              返回 BeautifulSoup对象 协议 主域名 不含协议的url链接 状态码
+    抓取url 返回 BeautifulSoup对象 协议 主域名 不含协议的url链接 状态码
     :param url:         原始url
     :param re_count:    最大失败重试计数
     :param ignore:      忽略错误
@@ -91,7 +96,7 @@ def get_url_to_bs(url, re_count=0, ignore=False):
         url = 'http://' + url
     try:
         r = requests.get(url, headers=headers, timeout=10, allow_redirects=False)
-        loggings.debug(r.request.headers)
+        # loggings.debug(r.request.headers)
         status_code = r.status_code
         content = r.content
         if not ignore and not (310 > status_code >= 200):
@@ -107,7 +112,7 @@ def get_url_to_bs(url, re_count=0, ignore=False):
         else:
             return False, None, None, None, None
     else:
-        loggings.debug('Read Cpmplete [%s]' % url)
+        loggings.debug('Read Complete [%s]' % url)
         # 获取协议，域名
         protocol, rest = urllib.request.splittype(url)
         domain = urllib.request.splithost(rest)[0]
@@ -121,6 +126,7 @@ def url_merge(url1, raw_url, protocol):
     """
     :param url1:    当前页URL
     :param raw_url: 采集到的URL
+    :param protocol 协议类型
     :return:        合并的完整URL
     """
     def protocol_check(url=''):
@@ -217,7 +223,7 @@ class get_page_links(object):
             if href_str == '':
                 continue
             page_rul.append([self.special_treatment(href_str), title])
-        #   合并函数        原始URL                   要组合的列表
+        #                 合并函数                          原始URL                   要组合的列表
         end_links = map(url_merge, [self.rest]*len(page_rul), [x[0] for x in page_rul], [self.protocol]*len(page_rul))
 
         x = 0
@@ -239,9 +245,11 @@ class chinese_to_digits(object):
                                 u'九': 9, u'十': 10, u'百': 100,
                                 u'千': 1000, u'万': 10000, u'亿': 100000000}
 
-    def run(self, uchars_cn):
-        s=uchars_cn
-        if not s :
+    def run(self, chars_cn):
+        if type(chars_cn) is int:
+            return chars_cn
+        s = chars_cn
+        if not s:
             return 0
         for i in [u'亿', u'万', u'千', u'百', u'十']:
             if i in s:
@@ -258,7 +266,6 @@ class chinese_to_digits(object):
 class draw_processing(object):
     """
     多进程模式画出字块分布函数图
-    提供数组
     """
     def __init__(self):
         self.mu_list = {}
@@ -279,6 +286,7 @@ class draw_processing(object):
             value = q.get(block=True)
             if value is None:
                 break
+            if mat_import: continue
             title = 'The {}th text distribution function'.format(str(self.n+1))
             self.mu_list[str(self.n)] = multiprocessing.Process(target=self.draw, args=(value, title))
             self.mu_list[str(self.n)].daemon = False        # False保证主线程不会结束
@@ -287,4 +295,7 @@ class draw_processing(object):
             self.n += 1
 
     def put(self, sequence):
+        """
+        :param sequence:    二维int列表
+        """
         self.queue.put(sequence)

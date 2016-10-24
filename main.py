@@ -5,21 +5,16 @@ import sys
 import public_features as PF
 from extract_text import extract_text
 import threading
-import copy
 import argparse
 
 
-
-# 目录页URL
-html_url = 'http://www.piaotian.net/html/5/5924/'
-
-ide_debug = '-s http://bbs.northernbbs.com/thread-670859-1-1.html'
+html_url = 'http://bbs.northernbbs.com/thread-666813-4-1.html'
 
 Error_url = ['']
 Unable_write = ['']
 
 
-def extract_url(ori_url, retry=0):
+def extract_contents_url(ori_url, retry=0):
     """
     提取目录页的有效URL，抓取网站title
     :param ori_url: 目录页URL
@@ -44,46 +39,51 @@ def extract_url(ori_url, retry=0):
         get_page_links = PF.get_page_links(soup_text, rest, protocol)
         all_page_links = get_page_links.get_href()
 
-        '''初始化中文数字转 int'''
-        c2d = PF.chinese_to_digits()
-
         def match_chinese(s):
             try:
                 re_s = re.match('[第卷]?\s*([零一二三四五六七八九十百千万亿]+)', s).group(1)
             except AttributeError:
-                re_s = '零'
+                try:
+                    re_s = int(re.match('[第卷]?\s*([0123456789]+)', s).group(1))
+                except AttributeError:
+                    re_s = '零'
             return re_s
 
         PF.loggings.debug('Try to get the Chinese value for each title')
-        chinese_str = map(match_chinese, [x[-1] for x in all_page_links])
+        contents = list(map(match_chinese, [x[-1] for x in all_page_links]))
+
         PF.loggings.debug('make variable chinese_str duplicate')
-        test_number = copy.deepcopy(chinese_str)
-
+        '''初始化中文数字转 int'''
+        c2d = PF.chinese_to_digits()
         PF.loggings.debug('Began to Analyze the order of the article list...')
-        xx = list(map(c2d.run, list(test_number)))
-        test_number_str = ''.join([str(x) for x in xx])
+        contents = list(map(c2d.run, contents))
 
-        count = 0
-        enabel_digtes = True
+        '''验证目录是否有序'''
+        test_number_str = ''.join([str(x) for x in contents])
+        orderly = True
         if re.match('0*?123456789', test_number_str):
-            enabel_digtes = False
+            orderly = False
             PF.loggings.debug('The article list is sorted correctly :)')
         else:
             PF.loggings.debug('Article list sort exception :( Start the collating sequence')
+        '''将整数化的目录编号加入url title列表'''
 
-        for page_group in chinese_str:
-            if enabel_digtes:
-                digtes = c2d.run(page_group)
-                all_page_links[count].append(digtes)
-            else:
-                '''目录顺不正常，无需排序 只添加序号'''
-                all_page_links[count].append(count)
-            count += 1
+        if len(all_page_links) == len(contents):
+            for x in range(len(all_page_links)):
+                if orderly:                                 # 无序 使用实际序号
+                    all_page_links[x].append(contents[x])
+                else:
+                    all_page_links[x].append(x+1)                # 有序 直接添加序号
+
+        else:
+            PF.loggings.error('章节序号分析出现错误，填零处理')
+            [all_page_links[x].append(0) for x in range(len(all_page_links))]
+
         '''目录顺不正常，按照序号count排序'''
-        if enabel_digtes:
+        if orderly:
             all_page_links = sorted(all_page_links, key=lambda x: x[-1])
-
         PF.loggings.debug('The article list sort is complete')
+
         return all_page_links, len(all_page_links), ori_domain
 
 
@@ -91,9 +91,7 @@ def process(fx, link_list, var_args=None):
     """
     :param fx:          提取文本
     :param link_list:   页面URL总列表
-    :param retry:       失败重试次数
     """
-
     PF.try_mkdir(PF.down_path)
     while link_list:
         pop = link_list.pop(0)      # 提取一条链接并从原始列表删除
@@ -142,54 +140,50 @@ class UrlAction(argparse.Action):
 
 def args_parser():
     parse = argparse.ArgumentParser(description='文本下载器帮助',
-                                    epilog='空参数将使用预定义的Url: %s' % html_url,
+                                    epilog='空参数将使用预定义的 "-s %s"' % html_url,
                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     ''''''
     parse_url_group = parse.add_mutually_exclusive_group()
     parse_url_group.add_argument('-c', metavar='catalog url', nargs=1, type=str, action=UrlAction,
                                  help='目录页地址，下载小说通常为所有章节的目录页url')
-    parse_url_group.add_argument('-s', metavar='single url', nargs=1, type=str, action=UrlAction,
-                                 help='文本页面URL, 抓取单一url的文本内容')
+    parse_url_group.add_argument('-s', metavar='single url', nargs=1, type=str, action=UrlAction, default=html_url,
+                                 help='文本页URL, 抓取单一url的文本内容')
     ''''''
     parse.add_argument('-r', nargs=1, dest='retry', type=int, choices=range(0, 8), default=3, help='最大请求失败重试次数')
-
-    parse.add_argument('-b', dest='block_size', type=int, choices=range(2, 10), default=5, help='文本行块分布函数块大小')
-
-    parse.add_argument('-debug', nargs=1, type=int, choices=range(0, 4), default=1,
+    parse.add_argument('-debug', nargs=1, type=int, choices=range(0, 4), default=3,
                        help='debug功能，0关闭，1输出到控制台，2输出到文件，3同时输出')
 
-    switch_group = parse.add_argument_group(title='额外选项', description='打开或关闭对应功能')
-    switch_group.add_argument('--drawing', action='store_const', const=True, default=False, help='绘制文本分布函数图')
+    switch_group = parse.add_argument_group(title='高级选项', description='针对不同的情况调整策略以获得最佳效果')
+    switch_group.add_argument('-b', dest='block_size', type=int, choices=range(2, 10), default=5,
+                              help='文本行块分布函数块大小，值越小筛选越严格，获得的内容可能越少，适用于正文密集度高，反之同理')
+    switch_group.add_argument('--drawing', action='store_const', const=True, default=False,
+                              help='绘制文本分布函数图，图形化上一个选项的文本块分布函数，可调整不同值做对比，仅在文本页-s模式有效')
     switch_group.add_argument('--delete-blank', dest='leave_blank', action='store_const', const=False,
                               default=True, help='删除文本中的空格，默认保留')
-    switch_group.add_argument('--save-image', dest='image',action='store_const', const=True, default=False,
-                              help='保留正文中的图片链接')
+    switch_group.add_argument('--save-image', dest='image', action='store_const', const=True, default=False,
+                              help='保留正文中的图片链接，默认删除')
     switch_group.add_argument('--repeat', action='store_const', const=True, default=False,
-                              help='启用循环过滤，默认关闭，只进行一次过滤')
+                              help='启用循环过滤，对页面进行多次筛选，适合有多段落的情况，默认关闭')
 
     parse.add_argument('--version', action='version', version='%(prog)s 0.4', help='显示版本号')
     args_ = parse.parse_args()
-    if args_.c is not None:args_.drawing = False
-    print(args_)
+    if args_.c is not None:
+        args_.drawing = False                                                           # 抓取目录-c模式下关闭绘图功能
+    # print(args_)
     return args_
 
 if __name__ == '__main__':
     args = args_parser()
     PF.init_logs(PF.loggings, args.debug)
 
-    if args.s:
+    if not args.c:
         page_count = 1
         process(fx=extract_text, link_list=[[html_url, '', 1000]], var_args=args)
     else:
-        '''从目录页面提取所有章节URL'''
-        links, page_count, domain = extract_url(html_url, retry=args.retry)
+        links, page_count, domain = extract_contents_url(html_url, retry=args.retry)    # 从目录页面提取所有章节URL
         PF.loggings.debug('chapter processing starts  ')
-        '''多线程处理处理章节URL'''
-        multithreading()
-        # '''单线程处理章节URL列表'''
-        # process(fx=extract_text, link_list=links, retry=retry_count)
-        '''合并文本'''
-        PF.text_merge(os.path.abspath('.'), count=page_count)
+        multithreading()                                                                # 多线程处理处理章节URL
+        PF.text_merge(os.path.abspath('.'), count=page_count)                           # 合并文本
 
     if len(Unable_write) == 1 and len(Error_url) == 1:
         PF.loggings.debug('script complete, Everything OK!')
