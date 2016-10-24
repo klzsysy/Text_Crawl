@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+"""
+抓取网页提取正文保存到文件
+主要是我自己用于下载小说用的，只测试了几个我自己常去下载的站点，当然也可以用于提取某页面的正文
+目前不支持需要的网页
+"""
 import re
 import os
 import sys
@@ -8,7 +13,7 @@ import threading
 import argparse
 
 
-html_url = 'http://bbs.northernbbs.com/thread-666813-4-1.html'
+html_url = 'https://zhuanlan.zhihu.com/p/22812913'
 
 Error_url = ['']
 Unable_write = ['']
@@ -139,7 +144,7 @@ class UrlAction(argparse.Action):
 
 
 def args_parser():
-    parse = argparse.ArgumentParser(description='文本下载器帮助',
+    parse = argparse.ArgumentParser(prog='Text fetching', description='文本抓取使用方法',
                                     epilog='空参数将使用预定义的 "-s %s"' % html_url,
                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     ''''''
@@ -153,7 +158,7 @@ def args_parser():
     parse.add_argument('-debug', nargs=1, type=int, choices=range(0, 4), default=3,
                        help='debug功能，0关闭，1输出到控制台，2输出到文件，3同时输出')
 
-    switch_group = parse.add_argument_group(title='高级选项', description='针对不同的情况调整策略以获得最佳效果')
+    switch_group = parse.add_argument_group(title='高级选项', description='针对不同的情况调整策略以获得最佳效果, 参数只需要输入开头即可')
     switch_group.add_argument('-b', dest='block_size', type=int, choices=range(2, 10), default=5,
                               help='文本行块分布函数块大小，值越小筛选越严格，获得的内容可能越少，适用于正文密集度高，反之同理')
     switch_group.add_argument('--drawing', action='store_const', const=True, default=False,
@@ -162,20 +167,21 @@ def args_parser():
                               default=True, help='删除文本中的空格，默认保留')
     switch_group.add_argument('--save-image', dest='image', action='store_const', const=True, default=False,
                               help='保留正文中的图片链接，默认删除')
-    switch_group.add_argument('--repeat', action='store_const', const=True, default=False,
+    switch_group.add_argument('--repeat',  action='store_const', const=True, default=False,
                               help='启用循环过滤，对页面进行多次筛选，适合有多段落的情况，默认关闭')
-
-    parse.add_argument('--version', action='version', version='%(prog)s 0.4', help='显示版本号')
-    args_ = parse.parse_args()
+    switch_group.add_argument('--value', dest='value', type=int, choices=range(2, 6), default=2,
+                              help='上一个选项的预设的值，大于第一次过滤文本长度的1/n')
+    parse.add_argument('--version', action='version', version='%(prog)s 0.6', help='显示版本号')
+    args_ = parse.parse_args(' -c http://read.qidian.com/BookReader/9sW8fN_RiY7xq9ZHzk0vMw2.aspx'.split())
     if args_.c is not None:
         args_.drawing = False                                                           # 抓取目录-c模式下关闭绘图功能
-    # print(args_)
+    print(args_)
     return args_
 
 if __name__ == '__main__':
     args = args_parser()
     PF.init_logs(PF.loggings, args.debug)
-
+    pass
     if not args.c:
         page_count = 1
         process(fx=extract_text, link_list=[[html_url, '', 1000]], var_args=args)
@@ -188,12 +194,12 @@ if __name__ == '__main__':
     if len(Unable_write) == 1 and len(Error_url) == 1:
         PF.loggings.debug('script complete, Everything OK!')
         sys.exit(0)
-    PF.loggings.debug('script complete, EBut there are some errors :(')
+    PF.loggings.debug('script complete, But there are some errors :(')
     try:
         terminal_size = os.get_terminal_size().columns - 1
     except BaseException:
         terminal_size = 70
-    PF.loggings.info('\n\n\n{}\n{}Error total:\n{}'.format('+' * terminal_size, ' ' * int(terminal_size / 2 - 5),
-                                                           '+' * terminal_size))
-    PF.loggings.info('# '.join(Error_url) + '# '.join(Unable_write))
+    PF.loggings.info('\n\n{0}\n{1}Error total:\n{2}\n{3}\n{4}'.format('+' * terminal_size, ' ' * int(terminal_size / 2 - 5),
+                        '# '.join(Error_url), '# '.join(Unable_write), '+' * terminal_size))
+
     sys.exit(1)

@@ -95,7 +95,7 @@ def get_url_to_bs(url, re_count=0, ignore=False):
     if not re.match('^https?://', url):
         url = 'http://' + url
     try:
-        r = requests.get(url, headers=headers, timeout=10, allow_redirects=False)
+        r = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
         # loggings.debug(r.request.headers)
         status_code = r.status_code
         content = r.content

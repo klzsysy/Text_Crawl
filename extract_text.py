@@ -15,7 +15,7 @@ class extract(object):
             def processText(self):
         4:新增了使用递归处理可能出现多段正文的情况
     """
-    def __init__(self, html="", block_size=4, image=False, leave_blank=True, drawing=True, repeat=False):
+    def __init__(self, html="", block_size=4, image=False, leave_blank=True, drawing=True, repeat=False, value=2):
         """
         :param html:        html文档
         :param block_size:  文本块大小， 越小越严格，越大越宽松
@@ -47,6 +47,7 @@ class extract(object):
         self.leave_blank = leave_blank
         self.drawing = drawing
         self.repeat = repeat
+        self.repeat_rvlaue = value
         # loggings.debug('blocks_size={0};save_image={1};leave_blank={2};drawing={3}repeat={4}'.format(self.blocks_size,
         #                 self.save_image, self.leave_blank, self.drawing, self.repeat))
         if self.drawing:
@@ -78,6 +79,7 @@ class extract(object):
         '''生成块列表'''
         for x in range(len(self.c_texts) - self.blocks_size + 1):
             self.c_blocks.append(sum([len(y) for y in self.c_texts[x:x + self.blocks_size]]))
+
         # 首次过滤最长的文本段没有达到预定义的长度 则视为太短抛弃
         if max(self.c_texts_length) <= self.minimum_effective_value and not recursion:
             loggings.debug('文本长度小于预设值{}，被抛弃:\n{}\n{}\n{}'.format(self.minimum_effective_value, '-'*40,
@@ -88,7 +90,7 @@ class extract(object):
         max_block = max(self.c_blocks)
         self.start = self.end = self.c_blocks.index(max_block)
         """
-        这里start与end点是大于行块的最小值。
+        这里start与end点是大于 行块的最小值。
         point > N，通常这个最小值是0（空行就是0），增大N将会过滤掉长度小于N的行
         """
         self.N = min(self.c_blocks)
@@ -97,7 +99,6 @@ class extract(object):
 
         while self.end < len(self.c_blocks) - 1 and self.c_blocks[self.end] > self.N:
             self.end += 1
-
         self._text = '\n'.join(self.c_texts[self.start + self.blocks_size: self.end])
 
         if self.drawing:self.Draw.put(self.c_blocks)                # 画图
@@ -108,9 +109,9 @@ class extract(object):
             self.x = 1
         else:                                                       # 非第一次的递归操作
             loggings.debug('第%s次再分析完成' % self.x)
-            if len(self._text) < int(self.section / 2):             # 本次字符串长度小于第一次的一半则忽略
-                loggings.debug('本次分析达不到预定义的要求(小于最长段落的1/2)，抛弃如下内容:'
-                               '\n{}\n{}\n{}'.format('-' * 100, self._text, '-' * 100))
+            if len(self._text) < int(self.section / self.repeat_rvlaue):             # 本次字符串长度小于第一次的一半则忽略
+                loggings.debug('本次分析达不到预定义的要求(大于最长段落的1/{})，抛弃如下内容:'
+                               '\n{}\n{}\n{}'.format(self.repeat_rvlaue, '-' * 100, self._text, '-' * 100))
                 return None
         self.store_text.append([self.start, self._text])            # 收集有效的段落
         # 删除已提取的段落
@@ -159,22 +160,21 @@ class extract(object):
         except BaseException:
             # 某些body异常的网页
             self.body = self.raw_page
-
         if self.save_image: self.body = self.reIMG.sub(r'{{\1}}', self.body)
         self.tags_process()
         self.c_texts = self.body.split("\n")
         self.text = self.blocks_process()
+
+        if self.drawing:
+            time.sleep(1)
+            self.Draw.put(None)                         # 确保绘图子进程结束后主线程可以退出
+            loggings.debug('多线程绘图进程已结束')
 
         if self.text is None:
             return None
         # 排序并组合二维列表为字符串
         self.finally_text = '\n\n# ---------------\n\n'.join(y[1] for y in sorted(self.text, key=lambda x: x[0]))
         self.del_invalid_text()
-
-        if self.drawing:
-            time.sleep(1)
-            self.Draw.put(None)                         # 确保绘图子进程结束后主线程可以退出
-            loggings.debug('多线程绘图进程已结束')
 
         return self.finally_text
 
@@ -193,7 +193,7 @@ def extract_text(page_link, page_tiele, args=None):
     loggings.debug('Read Complete [%s]' % page_tiele)
 
     ext = extract(html=str(page_soup), block_size=args.block_size,
-                  leave_blank=args.leave_blank, drawing=args.drawing, repeat=args.repeat)
+                  leave_blank=args.leave_blank, drawing=args.drawing, repeat=args.repeat, value=args.value)
 
     loggings.info('Start trying to filter the page text [%s]' % page_tiele)
     text = ext.crawl_context()

@@ -9,6 +9,8 @@ import random
 from bs4 import BeautifulSoup as bs
 import os
 from public_features import down_path, try_mkdir, loggings
+import requests
+import re
 
 ISOTIMEFORMAT='%Y-%m-%d %X'
 
@@ -16,7 +18,7 @@ save_path = os.path.join('.', down_path)
 #通用装饰器1
 def writeBook(func):
     def swr(*args,**kw):
-        f = open(os.path.join(save_path, args[-1] + '.txt'), 'a', encoding='utf-8')
+        f = open(os.path.join(save_path, args[-1] + '.txt'), 'a+', encoding='utf-8')
         f.write('\n\n')
         result = func(*args, **kw)
         f.write('>')
@@ -24,11 +26,11 @@ def writeBook(func):
     return swr
 #创建文件并定义名称
 def createBook(bookName):
-    f=open(os.path.join(save_path,  bookName +'.md'),'a',encoding='utf-8')
+    f=open(os.path.join(save_path,  bookName + '.txt'), 'a', encoding='utf-8')
 
 #写卷目录
 def createTitle(title,bookName):
-    f=open(os.path.join(save_path, bookName+'.md'),'a',encoding='utf-8')
+    f=open(os.path.join(save_path, bookName+'.txt'), 'a', encoding='utf-8')
     f.write('\n\n### ' + title)
 
 #写每卷中对应的章节目录
@@ -51,49 +53,46 @@ def writeZhangjie2(menuContentBs, bookName,i):
 # 写章节细节和每章内容的方法(还有点问题)
 
 def writeZhangjieDetail(menuZhangJieSpan, bookName,menuZhangJieHrefList):
-    j = 0
+    x = 0
     for spanValue in menuZhangJieSpan:
-        timeout = random.choice(range(80, 180)) / 100
-        loggings.debug('延时：' + str(timeout))
+        # timeout = random.choice(range(80, 180)) / 100
+        # loggings.debug('延时：' + str(timeout))
 
         spanValue = bs(str(spanValue), 'html.parser').get_text()
 
-        print(j , spanValue , '--执行到此章节--' , time.strftime(ISOTIMEFORMAT, time.localtime())) #打印已经写到哪个章节
-        f = open(os.path.join(save_path, bookName + '.md'), 'a', encoding='utf-8')
+        loggings.debug('{:<3}{:<20}{:<12}{:<}'.format(str(x) , spanValue , '--执行到此章节--', str(time.strftime(ISOTIMEFORMAT, time.localtime())))) #打印已经写到哪个章节
+        f = open(os.path.join(save_path, bookName + '.txt'), 'a', encoding='utf-8')
         f.write('\n\n---')
         f.write('\n\n#### ' + spanValue + '\n\n')
         try:
-            chapterCode = urllib.request.urlopen(menuZhangJieHrefList[j]).read()
-            result = chardet.detect(chapterCode)  # 检验读取的页面的编码方式
-            if (result['confidence'] > 0.5):  # 如果概率大于0.5 即采取这种编码
-                chapterCode = chapterCode.decode(result['encoding'])
+            # chapterCode = urllib.request.urlopen(menuZhangJieHrefList[j]).read()
+            re_chapter = requests.get(menuZhangJieHrefList[x])
+            chapterCode = re_chapter.content
+
+            re_chapter.close()
             chapterSoup = bs(chapterCode, 'html.parser')  # 使用BS读取解析网页代码
             chapterResult = chapterSoup.find(id='chaptercontent')  # 找到id='chaptercontent'的节点
-
             chapterResultChilds = chapterResult.children
 
-            storySrc = bs(str(list(chapterResultChilds)[3]), "html.parser")
-            fileurl = storySrc.contents[0].attrs['src']
+            story_src = bs(str(list(chapterResultChilds)[3]), "html.parser")
+            fileurl = story_src.contents[0].attrs['src']
 
-            fileArticle1 = urllib.request.urlopen(fileurl).read().decode('gb2312', errors='replace')
-            fileArticle2 = bs(fileArticle1, 'html.parser')
-            fileArticle = str(fileArticle2).replace("document.write('　　", "")\
-                .replace("<p>　　", "  \n\n").replace("</p>", "").replace("')","")\
-                .replace('<a href="http://www.qidian.com">起点'
-                         '中文网 www.qidian.com 欢迎广大书友光临阅读，最新、最快、最火的连载作品'
-                         '尽在起点原创！</a><a>手机用户请到m.qidian.com阅读。</a>',"---")\
-                .replace('<ahref=http: www.qidian.com="">起点'
-                         '中文网www.qidian.com欢迎广大书友光临阅读，最新、最快、最火的连载作品'
-                         '尽在起点原创！</ahref=http:><a>手机用户请到m.qidian.com阅读。</a>',"---")\
-                .replace("起点中文网www.qidian.com欢迎广大书友光临阅读，最新、最快、最火的连载作品"
-                         "尽在起点原创！</a><a>手机用户请到m.qidian.com阅读。</a></a>","---")\
-                .replace("http://www.qidian.com","http://www.jianshu.com/users/6ca20b30c14c")
-            f.write(fileArticle)
-        except:
+            file_re = requests.get(fileurl)
+            file_content = file_re.content
+            file_bs = bs(file_content, 'html5lib')
+            text_file = str(file_bs)
+            file_re.close()
+            text_file = re.sub('<[\s\S]*?>|[ \t\r\f\v]', '', text_file)
+            text_file = re.sub('\S+\(|\);|\\n+', '', text_file)
+            text_file = re.sub('起点中文.*', '', text_file)
+
+            text_file = text_file.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+            f.write(text_file)
+        except BaseException as err:
             f.write('章节丢失')
-            loggings.error('章节丢失')
-        j = j + 1
-        time.sleep(timeout)
+            loggings.error('章节丢失 %s' % str(err))
+        x += 1
+
 
 #获取各个章节的URL
 def getHref(menuZhangJieHref):
@@ -119,8 +118,8 @@ def write(menuContentBs,menu,n):
             writeZhangjie2(menuContentBs, bookName, i)
         else:
             writeZhangjie(menuContentBs, bookName, i)
-        print(i + 1, muluTitle, '--执行到此目录', time.strftime(ISOTIMEFORMAT, time.localtime()))  # 打印已经写入的目录
-        i = i + 1
+        print(str(i + 1), 'xx', '--执行到此目录', str(time.strftime(ISOTIMEFORMAT, time.localtime())))  # 打印已经写入的目录
+        i += 1
         # time.sleep(1)
 
 def main(url):

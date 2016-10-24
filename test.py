@@ -288,3 +288,8 @@ if __name__=='__main__':
     q.put(b)
     q.put(None)
 
+import requests
+
+login_data ={'username':'', 'password':'xxxxx'}
+s = requests.session()
+s.post('http://www.zhihu.com/login',login_data)
