@@ -109,9 +109,14 @@ def process(fx, link_list, var_args=None):
             PF.loggings.error('URL{} requests failed, {} {} {}'.format(var_args.retry, title, link, str(err)))
             Error_url.append('requests failed ' + ' '.join([str(count), title, link, str(err)]))
         else:
-            wr = PF.write_text(count, title, page_text, page_count)
+
+            wr = PF.write_text(var_args, count, title, page_text, page_count)
             if wr is not True:
                 Unable_write.append('Write failed ' + ' '.join([str(count), title, link, str(wr)]))
+            else:
+                if var_args.email:
+                    email = PF.send_email(page_text, title=title, to_addr=var_args.addr)
+                    email.send()
 
 
 def multithreading():
@@ -169,10 +174,12 @@ def args_parser():
                               help='保留正文中的图片链接，默认删除')
     switch_group.add_argument('--repeat',  action='store_const', const=True, default=False,
                               help='启用循环过滤，对页面进行多次筛选，适合有多段落的情况，默认关闭')
-    switch_group.add_argument('--value', dest='value', type=int, choices=range(2, 6), default=2,
+    switch_group.add_argument('-value', dest='value', type=int, choices=range(2, 6), default=2,
                               help='上一个选项的预设的值，大于第一次过滤文本长度的1/n')
+    switch_group.add_argument('--email', action='store_const', const=True, default=False, help='发送邮件给收目标收件人')
+    switch_group.add_argument('-addr', default='sonny_yang@kindle.cn', help='邮件收收件人地址')
     parse.add_argument('--version', action='version', version='%(prog)s 0.6', help='显示版本号')
-    args_ = parse.parse_args(' -c http://read.qidian.com/BookReader/9sW8fN_RiY7xq9ZHzk0vMw2.aspx'.split())
+    args_ = parse.parse_args()
     if args_.c is not None:
         args_.drawing = False                                                           # 抓取目录-c模式下关闭绘图功能
     print(args_)

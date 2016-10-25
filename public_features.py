@@ -7,7 +7,17 @@ import fnmatch
 import urllib.request
 from bs4 import BeautifulSoup
 import requests
+from email import encoders
+from email.header import Header
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.utils import parseaddr, formataddr
 import multiprocessing
+import smtplib
+
+
+
 try:
     import matplotlib.pyplot as pyplot
 except ImportError:
@@ -161,13 +171,16 @@ def url_merge(url1, raw_url, protocol):
         return url
 
 
-def write_text(count, title, text, page_count=5):
+def write_text(args, count, title, text, page_count=5):
     if text is None or text == '':
         return True
     title = re.sub(r'[/\\:\*\?\"<>\|]', '-', title)         # 过滤文件名非法字符
+    if args.s and count == 1000:
+        filename_format = '.\{}\{}.txt'.format(down_path, title)
+    else:
+        filename_format = '.\{0}\{1:<{2}} {3}.txt'.format(down_path, str(count), len(str(page_count)), title)
     try:
-        with open('.\{}\{:<{}} {}.txt'.format(down_path, str(count),
-                                              len(str(page_count)), title), 'w', encoding='utf-8') as f:
+        with open(filename_format, 'w', encoding='utf-8') as f:
             f.write(text)
         loggings.debug('The text was successfully written to the file [%-4s %s]' % (count, title))
         return True
@@ -299,3 +312,71 @@ class draw_processing(object):
         :param sequence:    二维int列表
         """
         self.queue.put(sequence)
+
+class send_email(object):
+    def __init__(self, text='', title='', to_addr='sonny_yang@kindle.cn'):
+        # 发件人
+        # to_addr = 'klzsysy@live.com'
+        self.from_addr = 'it_yangsy@ish.com.cn'
+        # 发件人密码
+        self.password = 'klzsysy'
+        # 收件人列表
+        self.to_addr = self._split_addr(to_addr)
+        self.text = text
+        self.mail_title = title
+        self.smtp_server = 'smtp.ish.com.cn'
+        # 退信收件人列表
+        # self.bounce_addr = self._split_addr(bounce_addr)
+
+    def _split_addr(self, email_addr=''):
+        addr = []
+        for x in email_addr.split(';'):
+            x = x.strip()
+            addr.append(x)
+        return addr
+
+    def _format_addr(self, s):
+        name, addr = parseaddr(s)
+        return formataddr((Header(name, 'utf-8').encode(), addr))
+
+    def _sendmail(self):
+        with open('.\{}\{}.txt'.format(down_path, self.mail_title), 'rb') as text:
+            self.msg = MIMEMultipart()
+            self.msg.attach(MIMEText('给我发到kindle', 'plain', 'utf-8'))
+
+            self.msg['From'] = self._format_addr('Python Program <%s>' % self.from_addr)
+            self.msg['To'] = ';'.join(self.to_addr)
+            self.msg['Subject'] = Header('Convert', 'utf-8').encode()
+
+            self.mime = MIMEBase('text', 'txt', filename=self.mail_title+'.txt')
+            self.mime.add_header('Content-Disposition', 'attachment', filename=self.mail_title+'.txt')
+            self.mime.add_header('Content-ID', '<0>')
+            self.mime.add_header('X-Attachment-Id', '0')
+            self.mime.set_payload(text.read())
+            encoders.encode_base64(self.mime)
+
+            self.msg.attach(self.mime)
+
+        loggings.debug("构建邮件完成，尝试发送邮件...")
+        try:
+            loggings.debug("开始解析邮件服务器信息")
+            server = smtplib.SMTP(self.smtp_server, 25)
+            server.set_debuglevel(1)
+            loggings.debug("开始登录到smtp服务器")
+            server.login(self.from_addr, self.password)
+            loggings.debug("登录到SMTP服务器成功开始发送邮件")
+            server.sendmail(self.from_addr, self.to_addr, self.msg.as_string())
+            server.close()
+            loggings.info("邮件已成功发送到%s" % self.to_addr)
+        except smtplib.SMTPAuthenticationError as err:
+            loggings.debug("登录到smtp服务器失败！")
+            raise err
+        except Exception as err:
+            err_text = 'Error:\n' + str(err) + '\n\nHeader:\n' + self.msg.as_string() + '\nMessage body:\n' + self.text
+            loggings.debug("邮件发送失败")
+            raise err
+        else:
+            return True
+
+    def send(self):
+        self._sendmail()

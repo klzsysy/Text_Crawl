@@ -5,7 +5,6 @@
 import urllib.request
 import chardet
 import time
-import random
 from bs4 import BeautifulSoup as bs
 import os
 from public_features import down_path, try_mkdir, loggings
