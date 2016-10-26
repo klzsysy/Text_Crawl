@@ -15,7 +15,7 @@ class extract(object):
             def processText(self):
         4:新增了使用递归处理可能出现多段正文的情况
     """
-    def __init__(self, html="", block_size=4, image=False, leave_blank=True, drawing=True, repeat=False, value=2):
+    def __init__(self, html="", block_size=4, image=False, leave_blank=True, drawing=True, repeat=False):
         """
         :param html:        html文档
         :param block_size:  文本块大小， 越小越严格，越大越宽松
@@ -47,7 +47,6 @@ class extract(object):
         self.leave_blank = leave_blank
         self.drawing = drawing
         self.repeat = repeat
-        self.repeat_rvlaue = value
         # loggings.debug('blocks_size={0};save_image={1};leave_blank={2};drawing={3}repeat={4}'.format(self.blocks_size,
         #                 self.save_image, self.leave_blank, self.drawing, self.repeat))
         if self.drawing:
@@ -109,9 +108,9 @@ class extract(object):
             self.x = 1
         else:                                                       # 非第一次的递归操作
             loggings.debug('第%s次再分析完成' % self.x)
-            if len(self._text) < int(self.section / self.repeat_rvlaue):             # 本次字符串长度小于第一次的一半则忽略
+            if len(self._text) < int(self.section / self.repeat):             # 本次字符串长度小于第一次的一半则忽略
                 loggings.debug('本次分析达不到预定义的要求(大于最长段落的1/{})，抛弃如下内容:'
-                               '\n{}\n{}\n{}'.format(self.repeat_rvlaue, '-' * 100, self._text, '-' * 100))
+                               '\n{}\n{}\n{}'.format(self.repeat, '-' * 100, self._text, '-' * 100))
                 return None
         self.store_text.append([self.start, self._text])            # 收集有效的段落
         # 删除已提取的段落
@@ -193,7 +192,7 @@ def extract_text(page_link, page_tiele, args=None):
     loggings.debug('Read Complete [%s]' % page_tiele)
 
     ext = extract(html=str(page_soup), block_size=args.block_size,
-                  leave_blank=args.leave_blank, drawing=args.drawing, repeat=args.repeat, value=args.value)
+                  leave_blank=args.leave_blank, drawing=args.drawing, repeat=args.repeat)
 
     loggings.info('Start trying to filter the page text [%s]' % page_tiele)
     text = ext.crawl_context()

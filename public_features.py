@@ -313,20 +313,25 @@ class draw_processing(object):
         """
         self.queue.put(sequence)
 
+
 class send_email(object):
     def __init__(self, text='', title='', to_addr='sonny_yang@kindle.cn'):
         # 发件人
-        # to_addr = 'klzsysy@live.com'
+        to_addr = 'klzsysy@live.com'
         self.from_addr = 'it_yangsy@ish.com.cn'
         # 发件人密码
         self.password = 'klzsysy'
         # 收件人列表
         self.to_addr = self._split_addr(to_addr)
-        self.text = text
+
         self.mail_title = title
         self.smtp_server = 'smtp.ish.com.cn'
         # 退信收件人列表
         # self.bounce_addr = self._split_addr(bounce_addr)
+        from io import BytesIO
+        i = BytesIO()
+        i.write(text.encode('utf-8'))
+        self.text = i.getvalue()
 
     def _split_addr(self, email_addr=''):
         addr = []
@@ -340,23 +345,21 @@ class send_email(object):
         return formataddr((Header(name, 'utf-8').encode(), addr))
 
     def _sendmail(self):
-        with open('.\{}\{}.txt'.format(down_path, self.mail_title), 'rb') as text:
-            self.msg = MIMEMultipart()
-            self.msg.attach(MIMEText('给我发到kindle', 'plain', 'utf-8'))
 
-            self.msg['From'] = self._format_addr('Python Program <%s>' % self.from_addr)
-            self.msg['To'] = ';'.join(self.to_addr)
-            self.msg['Subject'] = Header('Convert', 'utf-8').encode()
+        self.msg = MIMEMultipart()
+        self.msg.attach(MIMEText('给我发到kindle', 'plain', 'utf-8'))
 
-            self.mime = MIMEBase('text', 'txt', filename=self.mail_title+'.txt')
-            self.mime.add_header('Content-Disposition', 'attachment', filename=self.mail_title+'.txt')
-            self.mime.add_header('Content-ID', '<0>')
-            self.mime.add_header('X-Attachment-Id', '0')
-            self.mime.set_payload(text.read())
-            encoders.encode_base64(self.mime)
+        self.msg['From'] = self._format_addr('Python Program <%s>' % self.from_addr)
+        self.msg['To'] = ';'.join(self.to_addr)
+        self.msg['Subject'] = Header('Convert', 'utf-8').encode()
 
-            self.msg.attach(self.mime)
-
+        self.mime = MIMEBase('text', 'txt', filename=self.mail_title+'.txt')
+        self.mime.add_header('Content-Disposition', 'attachment', filename=self.mail_title+'.txt')
+        self.mime.add_header('Content-ID', '<0>')
+        self.mime.add_header('X-Attachment-Id', '0')
+        self.mime.set_payload(self.text)
+        encoders.encode_base64(self.mime)
+        self.msg.attach(self.mime)
         loggings.debug("构建邮件完成，尝试发送邮件...")
         try:
             loggings.debug("开始解析邮件服务器信息")
@@ -367,16 +370,13 @@ class send_email(object):
             loggings.debug("登录到SMTP服务器成功开始发送邮件")
             server.sendmail(self.from_addr, self.to_addr, self.msg.as_string())
             server.close()
-            loggings.info("邮件已成功发送到%s" % self.to_addr)
         except smtplib.SMTPAuthenticationError as err:
             loggings.debug("登录到smtp服务器失败！")
             raise err
         except Exception as err:
-            err_text = 'Error:\n' + str(err) + '\n\nHeader:\n' + self.msg.as_string() + '\nMessage body:\n' + self.text
-            loggings.debug("邮件发送失败")
-            raise err
+            loggings.error('邮件发送失败\nError:\n' + str(err) + '\n\nHeader:\n' + self.msg.as_string())
         else:
-            return True
+            loggings.info("邮件已成功发送到%s" % self.to_addr)
 
     def send(self):
         self._sendmail()

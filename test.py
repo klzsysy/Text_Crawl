@@ -4,11 +4,17 @@
 """
 import requests as req
 import re
-
+import io
 import argparse
 link = 'http://python.usyiyi.cn/python_278/library/argparse.html'
 
-
+strs = "git使用之二——.gitignore文件详解 - 简书"
+t = io.BytesIO()
+t.write(strs.encode('utf-8'))
+print(t.getvalue())
+f = open('.\down_text\git使用之二——.gitignore文件详解 - 简书.txt', 'rb')
+print(f.read())
+f.close()
 # class FooAction(argparse.Action):
 #     def __init__(self,option_strings, dest, nargs=None, **kwargs):
 #         if nargs is not None:

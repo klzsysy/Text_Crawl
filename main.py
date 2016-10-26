@@ -109,14 +109,12 @@ def process(fx, link_list, var_args=None):
             PF.loggings.error('URL{} requests failed, {} {} {}'.format(var_args.retry, title, link, str(err)))
             Error_url.append('requests failed ' + ' '.join([str(count), title, link, str(err)]))
         else:
-
+            if var_args.email:
+                email = PF.send_email(page_text, title=title, to_addr=var_args.email)
+                email.send()
             wr = PF.write_text(var_args, count, title, page_text, page_count)
             if wr is not True:
                 Unable_write.append('Write failed ' + ' '.join([str(count), title, link, str(wr)]))
-            else:
-                if var_args.email:
-                    email = PF.send_email(page_text, title=title, to_addr=var_args.addr)
-                    email.send()
 
 
 def multithreading():
@@ -172,14 +170,15 @@ def args_parser():
                               default=True, help='删除文本中的空格，默认保留')
     switch_group.add_argument('--save-image', dest='image', action='store_const', const=True, default=False,
                               help='保留正文中的图片链接，默认删除')
-    switch_group.add_argument('--repeat',  action='store_const', const=True, default=False,
-                              help='启用循环过滤，对页面进行多次筛选，适合有多段落的情况，默认关闭')
-    switch_group.add_argument('-value', dest='value', type=int, choices=range(2, 6), default=2,
-                              help='上一个选项的预设的值，大于第一次过滤文本长度的1/n')
-    switch_group.add_argument('--email', action='store_const', const=True, default=False, help='发送邮件给收目标收件人')
-    switch_group.add_argument('-addr', default='sonny_yang@kindle.cn', help='邮件收收件人地址')
+    switch_group.add_argument('--repeat', nargs='?', type=int, choices=range(2, 6), const=2, default=False,
+                              help='启用循环过滤，对页面进行多次筛选，适合有多段落的情况，预设值为不小于首段文本长度的1/2')
+    switch_group.add_argument('--email', metavar='xx@abc.com', nargs='?', const='sonny_yang@kindle.cn', default=False,
+                              help='发送邮件给收目标收件人, 不输入邮件地址发送到预设邮箱 %(const)s')
+
     parse.add_argument('--version', action='version', version='%(prog)s 0.6', help='显示版本号')
-    args_ = parse.parse_args()
+    debug = '-s http://www.jianshu.com/p/55a8c7ee1c3f --email --repeat 3'.split()
+    debug = None
+    args_ = parse.parse_args(debug)
     if args_.c is not None:
         args_.drawing = False                                                           # 抓取目录-c模式下关闭绘图功能
     print(args_)
@@ -188,7 +187,7 @@ def args_parser():
 if __name__ == '__main__':
     args = args_parser()
     PF.init_logs(PF.loggings, args.debug)
-    pass
+
     if not args.c:
         page_count = 1
         process(fx=extract_text, link_list=[[html_url, '', 1000]], var_args=args)
