@@ -3,7 +3,7 @@ import re
 from public_features import get_url_to_bs, loggings, draw_processing
 import itertools
 import time
-
+import functools
 
 class extract(object):
     """
@@ -15,7 +15,7 @@ class extract(object):
             def processText(self):
         4:新增了使用递归处理可能出现多段正文的情况
     """
-    def __init__(self, html="", block_size=4, image=False, leave_blank=True, drawing=True, repeat=False):
+    def __init__(self, html='', block_size=4, image=False, leave_blank=True, drawing=True, repeat=False):
         """
         :param html:        html文档
         :param block_size:  文本块大小， 越小越严格，越大越宽松
@@ -34,6 +34,7 @@ class extract(object):
         self.respa = r'(&nbsp;)+'
         self.relt = r'&lt;'
         self.regt = r'&gt;'
+        self.rebr = '\n+'
         self.reIMG = re.compile(r'<img[\s\S]*?src=[\'|"]([\s\S]*?)[\'|"][\s\S]*?>')
 
         self.html = html
@@ -109,9 +110,13 @@ class extract(object):
         else:                                                       # 非第一次的递归操作
             loggings.debug('第%s次再分析完成' % self.x)
             if len(self._text) < int(self.section / self.repeat):             # 本次字符串长度小于第一次的一半则忽略
-                loggings.debug('本次分析达不到预定义的要求(大于最长段落的1/{})，抛弃如下内容:'
+                loggings.debug('本次分析达不到预定义的要求(大于最长段落的1/{})，若本段为所需要的请增大"--repeat"值，抛弃内容如下:'
                                '\n{}\n{}\n{}'.format(self.repeat, '-' * 100, self._text, '-' * 100))
                 return None
+
+        if not self.leave_blank:                                    # 删除空行
+            self._text = re.sub(self.rebr, '\n', self._text)
+
         self.store_text.append([self.start, self._text])            # 收集有效的段落
         # 删除已提取的段落
         self.c_texts = self.c_texts[:self.start + self.blocks_size] + self.c_texts[self.end:]
@@ -152,6 +157,7 @@ class extract(object):
             end   = min(y for y in index if y > len(self.finally_text) / 2)
             self.finally_text = self.finally_text[start:end]
 
+
     def crawl_context(self):
         self.raw_page = self.html
         try:
@@ -178,6 +184,20 @@ class extract(object):
         return self.finally_text
 
 
+def delete_ad(bs):
+    """
+    删除一些常见的广告推广等内容,修改原始对象无需返回函数
+    :param bs: BufferError 对象
+    """
+    ad_list = []
+    ad_list.append(bs.find_all('div', "thread_recommend thread-recommend"))
+    ad_list.append(bs.find_all('div', "share_btn_wrapper"))
+    ad_list.append(bs.find_all('div', "core_reply j_lzl_wrapper"))
+    for ad in ad_list:
+        for x in ad:
+            x.decompose()      # 方法将当前节点移除文档树并完全销毁
+
+
 def extract_text(page_link, page_tiele, args=None):
     '''
     请求URL并提取主要文本
@@ -190,6 +210,9 @@ def extract_text(page_link, page_tiele, args=None):
         page_tiele = get_page_tiele
 
     loggings.debug('Read Complete [%s]' % page_tiele)
+
+    if args.ad_rem:
+        delete_ad(page_soup)        # 去广告干扰
 
     ext = extract(html=str(page_soup), block_size=args.block_size,
                   leave_blank=args.leave_blank, drawing=args.drawing, repeat=args.repeat)

@@ -15,8 +15,8 @@ from email.mime.base import MIMEBase
 from email.utils import parseaddr, formataddr
 import multiprocessing
 import smtplib
-
-
+import locale
+import sys
 
 try:
     import matplotlib.pyplot as pyplot
@@ -127,7 +127,6 @@ def get_url_to_bs(url, re_count=0, ignore=False):
         protocol, rest = urllib.request.splittype(url)
         domain = urllib.request.splithost(rest)[0]
         r.close()
-
         soup = BeautifulSoup(content, 'html5lib')
         return soup, protocol, domain, rest, status_code
 
@@ -317,7 +316,6 @@ class draw_processing(object):
 class send_email(object):
     def __init__(self, text='', title='', to_addr='sonny_yang@kindle.cn'):
         # 发件人
-        to_addr = 'klzsysy@live.com'
         self.from_addr = 'it_yangsy@ish.com.cn'
         # 发件人密码
         self.password = 'klzsysy'
@@ -364,7 +362,7 @@ class send_email(object):
         try:
             loggings.debug("开始解析邮件服务器信息")
             server = smtplib.SMTP(self.smtp_server, 25)
-            server.set_debuglevel(1)
+            # server.set_debuglevel(1)
             loggings.debug("开始登录到smtp服务器")
             server.login(self.from_addr, self.password)
             loggings.debug("登录到SMTP服务器成功开始发送邮件")
@@ -380,3 +378,27 @@ class send_email(object):
 
     def send(self):
         self._sendmail()
+
+
+def output_text_terminal(text=''):
+    platform = sys.platform
+    code = locale.getdefaultlocale()[1]
+    code_dict = {
+        'cp65001':'utf-8',
+        'cp932':'gbk',
+        'cp950':'big5',
+        'cp949':'euc-kr',
+        'cp936':'gbk'}
+    try:
+        terminal_size = os.get_terminal_size().columns - 1
+    except BaseException:
+        terminal_size = 70
+
+    if platform == 'win32':
+        try:
+            text = text.encode(encoding=code_dict[code], errors='ignore').decode(encoding=code_dict[code])
+        except BaseException as err:
+            pass
+    text_format = '\n{0}\n{2}\n{0}\n{1}\n{0}\n{3}\n{0}'.format(terminal_size * '-', text, '|' * ((terminal_size//2) - 5)
+                    + ' 正文内容 '+ (terminal_size//2 - 5) * '|', terminal_size * '|')
+    print(text_format)

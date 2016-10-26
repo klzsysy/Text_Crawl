@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-抓取网页提取正文保存到文件
+抓取网页提取正文保存到文件或发送到邮箱（适合Kindle）
 主要是我自己用于下载小说用的，只测试了几个我自己常去下载的站点，当然也可以用于提取某页面的正文
-目前不支持需要的网页
+目前不支持需要登录的网页
 """
 import re
 import os
@@ -13,7 +13,7 @@ import threading
 import argparse
 
 
-html_url = 'https://zhuanlan.zhihu.com/p/22812913'
+html_url = 'http://bbs.northernbbs.com/thread-666813-1-2.html'
 
 Error_url = ['']
 Unable_write = ['']
@@ -109,12 +109,15 @@ def process(fx, link_list, var_args=None):
             PF.loggings.error('URL{} requests failed, {} {} {}'.format(var_args.retry, title, link, str(err)))
             Error_url.append('requests failed ' + ' '.join([str(count), title, link, str(err)]))
         else:
-            if var_args.email:
+            if var_args.email:                                                                          # 邮件发送
                 email = PF.send_email(page_text, title=title, to_addr=var_args.email)
                 email.send()
-            wr = PF.write_text(var_args, count, title, page_text, page_count)
-            if wr is not True:
-                Unable_write.append('Write failed ' + ' '.join([str(count), title, link, str(wr)]))
+            if var_args.dest == 'file' or var_args.dest == 'all':                                       # 写入文件
+                wr = PF.write_text(var_args, count, title, page_text, page_count)
+                if wr is not True:
+                    Unable_write.append('Write failed ' + ' '.join([str(count), title, link, str(wr)]))
+            if var_args.dest == 'terminal' or var_args.dest == 'all':                                   # 控制台输出
+                PF.output_text_terminal(page_text)
 
 
 def multithreading():
@@ -158,7 +161,7 @@ def args_parser():
                                  help='文本页URL, 抓取单一url的文本内容')
     ''''''
     parse.add_argument('-r', nargs=1, dest='retry', type=int, choices=range(0, 8), default=3, help='最大请求失败重试次数')
-    parse.add_argument('-debug', nargs=1, type=int, choices=range(0, 4), default=3,
+    parse.add_argument('-debug', nargs=1, type=int, choices=range(0, 4), default=[3],
                        help='debug功能，0关闭，1输出到控制台，2输出到文件，3同时输出')
 
     switch_group = parse.add_argument_group(title='高级选项', description='针对不同的情况调整策略以获得最佳效果, 参数只需要输入开头即可')
@@ -166,27 +169,30 @@ def args_parser():
                               help='文本行块分布函数块大小，值越小筛选越严格，获得的内容可能越少，适用于正文密集度高，反之同理')
     switch_group.add_argument('--drawing', action='store_const', const=True, default=False,
                               help='绘制文本分布函数图，图形化上一个选项的文本块分布函数，可调整不同值做对比，仅在文本页-s模式有效')
-    switch_group.add_argument('--delete-blank', dest='leave_blank', action='store_const', const=False,
-                              default=True, help='删除文本中的空格，默认保留')
-    switch_group.add_argument('--save-image', dest='image', action='store_const', const=True, default=False,
+    switch_group.add_argument('--blank-remove', dest='leave_blank', action='store_const', const=False,
+                              default=True, help='删除文本中的空格与空行，默认保留')
+    switch_group.add_argument('--image-remove', dest='image', action='store_const', const=True, default=False,
                               help='保留正文中的图片链接，默认删除')
+    switch_group.add_argument('--ad-remove', dest='ad_rem', action='store_const', const=False, default=True,
+                              help='关闭 删除广告及推广 功能，默认删除广告')
     switch_group.add_argument('--repeat', nargs='?', type=int, choices=range(2, 6), const=2, default=False,
                               help='启用循环过滤，对页面进行多次筛选，适合有多段落的情况，预设值为不小于首段文本长度的1/2')
-    switch_group.add_argument('--email', metavar='xx@abc.com', nargs='?', const='sonny_yang@kindle.cn', default=False,
-                              help='发送邮件给收目标收件人, 不输入邮件地址发送到预设邮箱 %(const)s')
+    switch_group.add_argument('-email', metavar='xx@abc.com', nargs='?', const='sonny_yang@kindle.cn', default=False,
+                              help='将获取的正文以邮件附件的形式发送到收件人, 不输入邮件地址发送到预设邮箱 %(const)s')
+    switch_group.add_argument('-dest', choices=['off', 'file', 'terminal', 'all'], default='file',
+                              help='将内容输出到指定目标 %(choices)s')
 
     parse.add_argument('--version', action='version', version='%(prog)s 0.6', help='显示版本号')
-    debug = '-s http://www.jianshu.com/p/55a8c7ee1c3f --email --repeat 3'.split()
+    debug = ' -dest terminal -s http://tieba.baidu.com/p/4835763412?pn=2 --re 2  -debug 1  --blank --dr'.split()
     debug = None
     args_ = parse.parse_args(debug)
     if args_.c is not None:
         args_.drawing = False                                                           # 抓取目录-c模式下关闭绘图功能
-    print(args_)
     return args_
 
 if __name__ == '__main__':
     args = args_parser()
-    PF.init_logs(PF.loggings, args.debug)
+    PF.init_logs(PF.loggings, args.debug[0])
 
     if not args.c:
         page_count = 1
