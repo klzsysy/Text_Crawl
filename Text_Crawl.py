@@ -12,10 +12,13 @@ import re
 import logging
 import shutil
 import os
-import fnmatch
 import urllib.request
 from bs4 import BeautifulSoup
 import requests
+import smtplib
+import locale
+import sys
+import fnmatch
 from email import encoders
 from email.header import Header
 from email.mime.text import MIMEText
@@ -23,9 +26,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.utils import parseaddr, formataddr
 import multiprocessing
-import smtplib
-import locale
-import sys
 
 try:
     import matplotlib.pyplot as pyplot
@@ -36,14 +36,36 @@ except ImportError:
 else:
     mat_import = False
 
-Error_url = ['']
-Unable_write = ['']
+"""
+默认参数配置，具体用途及可选参数可在args_parser函数中查看
+"""
+default_args = {
+    'pn': False,                                    # 尝试翻页
+    'pv': 2,                                        # 翻页时不同段落的有效比例1/pv, 即最长与最短文本段落的比例
+    'r': 3,                                         # 最大重试次数
+    'debug': 3,                                     # 0关闭，1输出到控制台，2输出到文件，3同时输出
+    'block_size': 4,                                # 文本行块分布函数块大小
+    'drawing': False,                               # 显示文本块函数
+    'leave_blank': True,                            # 保留空格与空行
+    'image': False,                                 # 保留图片URL
+    'ad_rem': True,                                 # 删除可能的广告
+    'loop': False,                                  # 对页面进行多次筛选 适合有多段文本
+    'email': False,                                 # 将结果发送邮件发送
+    'email_to_address': 'sonny_yang@kindle.cn',     # 默认邮件收件人
+    'dest': 'file',                                 # 结果输出位置
+    'min_text_length': 100,                         # 页面最长文本段落的最小长度 小于这个值的将丢弃
+    'm': 2                                          # 多线程数量  m x cpu
+}
 
 
 class FeaturesList(object):
-    def __init__(self):
+    def __init__(self, args):
         self.loggings = logging.getLogger('log')
         self.down_path = 'down_text'
+        self.saved_filename = []
+        self.args = args
+        self.Error_url = ['']
+        self.Unable_write = ['']
 
     def init_logs(self, logs, lev=1):
         """
@@ -74,35 +96,55 @@ class FeaturesList(object):
                 logs.warning('The log can not be written to the file')
         logs.info('log config complete')
 
-    def text_merge(self, path, count):
+    def text_merge(self, path, merge_name, make=None):
         """
         合并文本        bug 读取文件夹时不判定内容是否是本次生成
         :param path:    文本目录
         :param count:   文本总数
         """
+        if len(merge_name) < 2:
+            merge_name = 'text_merge.txt'
+        else:
+            merge_name = re.sub(r'[/\\:\*\?\"<>\|]', '-', merge_name)  # 过滤文件名非法字符
+            merge_name = '{}.txt'.format(merge_name)
+            self.origin_url_title_file = merge_name
+
         if os.path.isfile('fileappend.tmp'):
             os.remove('fileappend.tmp')
-        if os.path.isfile('text_merge.txt'):
-            os.remove('text_merge.txt')
+        if os.path.isfile(merge_name):
+            os.remove(merge_name)
 
+        self.loggings.debug('Create a merge file')
+        text_merge_path = os.path.join(path, self.down_path)
+
+        file_names = self.saved_filename
+        if len(file_names) == 0:
+            for _, _, file_names in os.walk(text_merge_path):
+                def num(s=''):
+                    try:
+                        int_s = int(s[:len(s.split()[0])])
+                    except BaseException:
+                        int_s = 0
+                    return int_s
+                file_names.sort(key=num)
+
+            self.loggings.debug('The merged text starts...')
         with open(os.path.join(path, "fileappend.tmp"), "a", encoding='utf-8') as dest:
-            self.loggings.debug('Create a merge file')
-            text_merge_path = os.path.join(path, self.down_path)
-            for _, _, filenames in os.walk(text_merge_path):
-                self.loggings.debug('The merged text starts...')
-                '''文件名排序'''
+            first = False
+            for filename in fnmatch.filter(file_names, '*.txt'):
+                with open(os.path.join(text_merge_path, filename), encoding='utf-8') as src:
+                    self.loggings.debug('合并 %s' % filename)
+                    if first:
+                        if make:
+                            segmentation = '\n\n# {0} 第{1}页{0} \n\n'.format('-' * 12, str(file_names.index(filename) + 1))
+                        else:
+                            segmentation = '\n\n# {0}\n\n'.format('-' * 18)
+                        dest.write(segmentation)
+                    first = True
+                    shutil.copyfileobj(src, dest)
 
-                def num(s):
-                    return int(s[:len(str(count))])
-
-                filenames.sort(key=num)
-
-                for filename in fnmatch.filter(filenames, "*.txt"):
-                    with open(os.path.join(text_merge_path, filename), encoding='utf-8') as src:
-                        shutil.copyfileobj(src, dest)
-                        dest.write('\n\n# ---------------------\n\n')
-        os.rename(os.path.join(path, "fileappend.tmp"), "text_merge.txt")
-        self.loggings.debug('Text merged successfully:[%s]' % os.path.join(path, 'text_merge.txt'))
+        os.rename(os.path.join(path, "fileappend.tmp"), merge_name)
+        self.loggings.debug('Text merged successfully:[%s]' % os.path.join(path, merge_name))
 
     def get_url_to_bs(self, url, re_count=0, ignore=False):
         """
@@ -185,20 +227,24 @@ class FeaturesList(object):
             return url
 
     def write_text(self, count, title, text, page_count=5):
+        self.try_mkdir(self.down_path)
         if text is None or text == '':
             return True
         title = re.sub(r'[/\\:\*\?\"<>\|]', '-', title)  # 过滤文件名非法字符
-        if args.s and count == 1000:
+        if self.args.s and count == 1000 and self.args.direction is False:
             filename_format = '.\{}\{}.txt'.format(self.down_path, title)
         else:
             filename_format = '.\{0}\{1:<{2}} {3}.txt'.format(self.down_path, str(count), len(str(page_count)), title)
+
         try:
             with open(filename_format, 'w', encoding='utf-8') as f:
                 f.write(text)
             self.loggings.debug('The text was successfully written to the file [%-4s %s]' % (count, title))
-            return True
         except BaseException as err:
             return err
+        else:
+            self.saved_filename.append(filename_format.split('\\')[-1])
+            return True
 
     def try_mkdir(self, path):
         if not os.path.isdir(path):
@@ -208,8 +254,7 @@ class FeaturesList(object):
             except BaseException:
                 raise OSError('Failed to create the folder %s' % path)
 
-
-    class chinese_to_digits(object):
+    class ChineseToDigits(object):
         """
         将中文数字转换为 int整数
         """
@@ -253,7 +298,7 @@ class FeaturesList(object):
         if platform == 'win32':
             try:
                 text = text.encode(encoding=code_dict[code], errors='ignore').decode(encoding=code_dict[code])
-            except BaseException as err:
+            except UnicodeEncodeError as err:
                 pass
         text_format = '\n{0}\n{2}\n{0}\n{1}\n{0}\n{3}\n{0}'.format(terminal_size * '-', text,
                                                                    '|' * ((terminal_size // 2) - 5)
@@ -294,7 +339,7 @@ class FeaturesList(object):
             if len(self.content) == 0:
                 self.content = self.soup.find_all(id='chapterlist')
             if len(self.content) == 0:
-                self.content = self.soup.find('div', re.compile('centent|mainbody|catalog.box'))
+                self.content = self.soup.find('div', re.compile('centent|mainbody|catalog.box|volume-wrap'))
             self.contentbs = BeautifulSoup(str(self.content), 'html5lib')
 
             self.urllist = self.contentbs.find_all('a')
@@ -320,6 +365,10 @@ class FeaturesList(object):
                     continue
                 if href_str == '':
                     continue
+                if re.search('分卷阅读', title):
+                    continue
+                if re.search('订阅本卷', title):                            # 没登录 VIP章节直接丢弃
+                    break
                 page_rul.append([self.special_treatment(href_str), title])
             # 合并函数          原始URL                   要组合的列表
             end_links = map(url_merge, [self.rest] * len(page_rul), [x[0] for x in page_rul],
@@ -333,7 +382,6 @@ class FeaturesList(object):
                 raise IndexError('\n\n{}\nThe directory page can not find a valid url, '
                                  'Possible links are incorrect or not supported by script'.format(self.rest.strip('/')))
             return page_rul
-
 
     def extract_contents_url(self, ori_url, retry=0):
         """
@@ -350,14 +398,13 @@ class FeaturesList(object):
             sys.exit(-1)
         else:
             self.loggings.debug('Open original url complete！')
-            if 'qidian.com' in ori_domain:
-                self.loggings.info('Use "qidian" Configure')
-                qidian = qidian_conf()
-                qidian.main(ori_url)
-                sys.exit(0)
-
+            # if 'qidian.com' in ori_domain:
+            #     self.loggings.info('Use "qidian" Configure')
+            #     qidian = self.qidian_conf()
+            #     qidian.main(ori_url)
+            #     sys.exit(0)
+            self.origin_url_title = soup_text.title.string
             self.loggings.debug('Start the analysis original html doc...')
-
             get_page_links = self.get_page_links(soup_text, rest, protocol)
             all_page_links = get_page_links.get_href(url_merge=self.url_merge)
 
@@ -366,7 +413,7 @@ class FeaturesList(object):
                     re_s = re.match('[第卷]?\s*([零一二三四五六七八九十百千万亿]+)', s).group(1)
                 except AttributeError:
                     try:
-                        re_s = int(re.match('[第卷]?\s*([0123456789]+)', s).group(1))
+                        re_s = int(re.match('[第卷]?\s*([0123456789]+[^.-])', s).group(1))
                     except AttributeError:
                         re_s = '零'
                 return re_s
@@ -376,7 +423,8 @@ class FeaturesList(object):
 
             self.loggings.debug('make variable chinese_str duplicate')
             '''初始化中文数字转 int'''
-            c2d = self.chinese_to_digits()
+
+            c2d = self.ChineseToDigits()
             self.loggings.debug('Began to Analyze the order of the article list...')
             contents = list(map(c2d.run, contents))
 
@@ -410,32 +458,23 @@ class FeaturesList(object):
 
 
 class ExtractText(FeaturesList):
-    """
-    通过《基于行块分布函数的通用网页正文抽取算法》实现
-    有变动:
-        1:直接取了分布函数最高点，然后向前后推进确定起始与结束点
-        3:针对小说类页面过滤无效内容
-            self.body = re.sub(reOTH, '', self.body)
-            def processText(self):
-        4:新增了使用递归处理可能出现多段正文的情况
-    """
-    def __init__(self, args):
+    def __init__(self):
         """
         block_size:  文本块大小， 越小越严格，越大越宽松
         image:       保留图片url
         leave_blank: 保留文字中的空格
         drawing:     绘制文本分布函数图
-        repeat:      重复过滤模式
+        loop:      重复过滤模式
         """
-        FeaturesList.__init__(self)
-        self.args = args
+        FeaturesList.__init__(self, args)
+        # self.args = args
         self.reBODY = re.compile(r'<body.*?>([\s\S]*?)<\/body>', re.I)
         self.reCOMM = r'<!--.*?-->'
         self.reTRIM = r'<{0}.*?>([\s\S]*?)<\/{0}>'
-        if args.leave_blank:
-            self.reTAG = r'<[\s\S]*?>|[\t\r\f\v]'  # 保留空格
+        if self.args.leave_blank:
+            self.reTAG = r'<[\s\S]*?>|[\t\r\f\v]'   # 保留空格和空行
         else:
-            self.reTAG = r'<[\s\S]*?>|[ \t\r\f\v]'  # 删除所有空格
+            self.reTAG = r'<[\s\S]*?>|[ \t\r\f\v]'  # 删除所有空格和保留空行
         self.respa = r'(&nbsp;)+'
         self.relt = r'&lt;'
         self.regt = r'&gt;'
@@ -446,18 +485,18 @@ class ExtractText(FeaturesList):
         self.save_image = args.image
         self.raw_page = ""
         self.c_texts = []
-        self.minimum_effective_value = 100          # 段落最低文本
+        self.min_text_length = default_args['min_text_length']          # 段落最低文本
         self.store_text = []
         self.section = 1
         self.leave_blank = args.leave_blank
         self.drawing = args.drawing
-        self.repeat = args.repeat
-        # loggings.debug('blocks_size={0};save_image={1};leave_blank={2};drawing={3}repeat={4}'.format(self.blocks_size,
-        #                 self.save_image, self.leave_blank, self.drawing, self.repeat))
+        self.loop = args.loop
+        # loggings.debug('blocks_size={0};save_image={1};leave_blank={2};drawing={3}loop={4}'.format(self.blocks_size,
+        #                 self.save_image, self.leave_blank, self.drawing, self.loop))
         if self.drawing:
             self.Draw = draw_processing()
 
-    def tags_process(self,):
+    def tags_process(self):
         self.body = re.sub(self.reCOMM, "", self.body)
         self.body = re.sub(self.reTRIM.format("script"), "", re.sub(self.reTRIM.format("style"), "", self.body))
         self.body = re.sub(self.reTAG, "", self.body)
@@ -474,8 +513,11 @@ class ExtractText(FeaturesList):
 
     def blocks_process(self):
         """
-        打开show_block_function可查看曲线图, 在断点bug的情况下可能无法显示图形，原因不明。
-        :return:            返回抽取的文本
+        通过《基于行块分布函数的通用网页正文抽取算法》实现
+        主要变动:
+            1:直接取了分布函数最高点，然后向前后推进确定起始与结束点
+            2:新增了使用递归处理可能出现多段正文的情况
+        使用 --dr 可查看文本分布函数曲线图, 在断点bug的情况下可能无法显示图形，原因不明。
         """
         self._text = None
         self.c_blocks = []
@@ -485,8 +527,8 @@ class ExtractText(FeaturesList):
             self.c_blocks.append(sum([len(y) for y in self.c_texts[x:x + self.blocks_size]]))
 
         # 首次过滤最长的文本段没有达到预定义的长度 则视为太短抛弃
-        if max(self.c_texts_length) <= self.minimum_effective_value and not self.recursion:
-            self.loggings.debug('文本长度小于预设值{}，被抛弃:\n{}\n{}\n{}'.format(self.minimum_effective_value, '-'*40,
+        if max(self.c_texts_length) <= self.min_text_length and not self.recursion:
+            self.loggings.debug('文本长度小于预设值{}，被抛弃:\n{}\n{}\n{}'.format(self.min_text_length, '-'*40,
                                                                       self.c_texts[self.c_texts_length.index(max(
                                                                           self.c_texts_length))], '-' * 40))
             return None
@@ -508,35 +550,48 @@ class ExtractText(FeaturesList):
         self._text = '\n'.join(self.c_texts[self.start + self.blocks_size: self.end])
 
         if self.drawing:self.Draw.put(self.c_blocks)                # 画图
-
+        self.loggings.debug('blocks:{} blocks_start:{}  blocks_end:{}'.format(len(self.c_blocks), self.start, self.end))
         '''尝试再次获取有效文本，针对有多段有效文本的情况'''
 
-        if not self.recursion:                                           # 第一次分析 获得本次字符串长度
+        if self.recursion is False and self.direction_status is False:          # 第一次分析 获得本次字符串长度
             self.section = len(self._text)
-            self.x = 1
-        else:                                                       # 非第一次的递归操作
-            self.loggings.debug('第%s次再分析完成' % self.x)
-            if len(self._text) < int(self.section / self.repeat):             # 本次字符串长度小于第一次的一半则忽略
-                self.loggings.debug('本次分析达不到预定义的要求(大于最长段落的1/{})，若本段为所需要的请增大"--repeat"值，抛弃内容如下:'
-                                    '\n{}\n{}\n{}'.format(self.repeat, '-' * 100, self._text, '-' * 100))
+            # self.x = 1
+        else:                                                                   # 非第一次的操作
+            self.x += 1
+            d = False
+
+            def detection_text_length(text, parameter, t=''):
+                if len(text) < int(self.section / parameter):                   # 本次字符串长度小于第一次的一半则忽略
+                    self.loggings.debug('本次分析达不到预定义的要求(大于最长段落的1/{0})，若本段为所需要的请增大"-{4}"值，抛弃内容如下:'
+                                        '\n{1}\n{2}\n{3}'.format(parameter, '-' * 100, text, '-' * 100, t))
+                    return True
+
+            if self.args.direction:
+                d = detection_text_length(self._text, self.args.pv, 'pv')
+            elif self.loop:
+                d = detection_text_length(self._text, self.loop, 'loop')
+            if d:
                 return None
 
         if not self.leave_blank:                                    # 删除空行
             self._text = re.sub(self.rebr, '\n', self._text)
 
+        self.loggings.debug('第%s次再分析完成' % self.x)
+        self.loggings.debug('有效标尺 %s' % self.section)
+        self.loggings.debug('本次获得有效长度 %s' % len(self._text))
         self.store_text.append([self.start, self._text])            # 收集有效的段落
         # 删除已提取的段落
         self.c_texts = self.c_texts[:self.start + self.blocks_size] + self.c_texts[self.end:]
         # 开始递归操作,查找符合调节的第二段文本
-        if self.repeat:
-            self.x += 1
+        if self.loop:
+            self.loggings.debug('第%s次分析开始' % (self.x + 1))
             self.recursion = True
             self.blocks_process()
 
         return self.store_text
 
     def del_invalid_text(self):
-        """删除特定组合的内容 解决一些靠分布算法不好搞的内容"""
+        """删除特定组合的内容 解决一些靠算法不好搞的内容"""
         lists = ("（快捷键←）",
                  "上一章", "返回目录", "加入书签", "推荐本书", "返回书页", "下一章", "（快捷键→）",
                  "投推", "荐票", "回目录", "标记", "书签", "登陆", "注册", '新用户', 'FAQ', '道具', '商城', '每日任务',
@@ -581,7 +636,7 @@ class ExtractText(FeaturesList):
         if self.text is None:
             return None
         # 排序并组合二维列表为字符串
-        self.finally_text = '\n\n# ---------------\n\n'.join(y[1] for y in sorted(self.text, key=lambda x: x[0]))
+        self.finally_text = '\n\n# -----\n\n'.join(y[1] for y in sorted(self.text, key=lambda x: x[0]))
         self.store_text = []
         self.del_invalid_text()
 
@@ -595,9 +650,31 @@ class ExtractText(FeaturesList):
         ad_list.append(self.page_soup.find_all('div', "thread_recommend thread-recommend"))
         ad_list.append(self.page_soup.find_all('div', "share_btn_wrapper"))
         ad_list.append(self.page_soup.find_all('div', "core_reply j_lzl_wrapper"))
+        ad_list.append(self.page_soup.find_all('div', 'weixin'))
+        ad_list.append(self.page_soup.find_all('a', string=re.compile('纠错')))
+        ad_list.append(self.page_soup.find_all('div', class_=re.compile('region_bright my_app|novel-ranking-frs-body|topic_list_box')))
+        ad_list.append(self.page_soup.find_all('li', class_=re.compile('l_badge')))
         for ad in ad_list:
             for x in ad:
                 x.decompose()      # 方法将当前节点移除文档树并完全销毁
+
+    def read_qidian(self, page_link=''):
+        """
+        起点中文网专用配置，该网站正文需要二次抓取
+        """
+        if 'qidian.com' in page_link:
+            page_text = self.page_soup.find(id='chaptercontent')
+            page_text = page_text.contents[3]
+            page_text_url = page_text.attrs['src']
+            page_text_bs, _, _, _, code = self.get_url_to_bs(page_text_url, re_count=self.args.retry)
+            page_text_bs = str(page_text_bs)
+            if code < 300:
+                page_text = re.sub('<[\s\S]*?>|[ \t\r\f\v]', '', page_text_bs)
+                page_text = re.sub('\S+\(|\);|\\n+|\'', '', page_text)
+                page_text = re.sub('起点中文.*', '', page_text).strip()
+                return page_text
+            else:
+                raise requests.ConnectionError('read failed {}{}'.format(page_link, code))
 
     def extract_text(self, page_link, page_tiele, page_id=0):
         """
@@ -607,23 +684,28 @@ class ExtractText(FeaturesList):
         self.id = page_id
         direction_url = None
         self.loggings.debug('Start Read %s' % page_link + page_tiele)
-        self.page_soup, protocol, _, _, _ = self.get_url_to_bs(page_link, re_count=args.retry)
+        self.page_soup, protocol, _, _, _ = self.get_url_to_bs(page_link, re_count=self.args.retry)
         get_page_tiele = self.page_soup.title.get_text()
         if page_tiele == '':
             page_tiele = get_page_tiele
+            if self.direction_status is False:
+                self.origin_url_title = page_tiele
 
-        if self.page_soup and args.direction:
-            direction_url = self.next_page(self.page_soup, direction=args.direction)
+        if self.page_soup and self.args.direction:
+            direction_url = self.next_page(self.page_soup, direction=self.args.direction)
             if direction_url:
                 direction_url = self.url_merge(page_url=page_link, raw_url=direction_url, protocol=protocol)
 
         self.loggings.debug('Read Complete [%s]' % page_tiele)
 
-        if args.ad_rem:
+        if self.args.ad_rem:
             self.delete_ad()        # 去广告干扰
 
         self.loggings.info('Start trying to filter the page text [%s]' % page_tiele)
-        text = self.crawl_context()
+
+        text = self.read_qidian(page_link)
+        if text is None:
+            text = self.crawl_context()
 
         self.loggings.debug('Page text filtering is complete [%s]' % page_tiele)
 
@@ -638,17 +720,23 @@ class ExtractText(FeaturesList):
         """
         启动位置
         """
-        self.try_mkdir(self.down_path)
         if not self.args.c:
             link_list = [[self.args.s, '', 1000]]
             page_count = 1
             self.single_process(link_list, page_count)
         else:
-            links, page_count, domain = self.extract_contents_url(self.args.c, retry=args.retry)  # 从目录页面提取所有章节URL
+            links, page_count, domain = self.extract_contents_url(self.args.c, retry=self.args.retry)  # 从目录页面提取所有章节URL
+            # self.single_process(link_list=links,page_count=page_count)
             mu_th(links, page_count)
-            self.text_merge(os.path.abspath('.'), count=page_count)  # 合并文本
 
-        if len(Unable_write) == 1 and len(Error_url) == 1:
+            if not self.args.dest == 'terminal':
+                self.text_merge(os.path.abspath('.'), merge_name=self.origin_url_title)  # 合并文本
+                if self.args.email:
+                    with open(self.origin_url_title_file, 'r') as f:
+                            email = send_email(text=f.read(), title=self.origin_url_title, to_addr=self.args.email)
+                            email.send()
+
+        if len(self.Unable_write) == 1 and len(self.Error_url) == 1:
             public.loggings.debug('script complete, Everything OK!')
             sys.exit(0)
         public.loggings.debug('script complete, But there are some errors :(')
@@ -658,68 +746,80 @@ class ExtractText(FeaturesList):
             terminal_size = 70
         public.loggings.info(
             '\n\n{0}\n{1}Error total:\n{2}\n{3}\n{4}'.format('+' * terminal_size, ' ' * int(terminal_size / 2 - 5),
-                                                             '# '.join(Error_url), '# '.join(Unable_write),
+                                                             '# '.join(self.Error_url), '# '.join(self.Unable_write),
                                                              '+' * terminal_size))
 
     def single_process(self, link_list, page_count):
         """
         :param link_list:   页面URL总列表
         """
-        self.recursion = False                  # 单页面进程标记
+        self.recursion = False                       # 单url重复抓取标记
+        self.direction_status = False                # 翻页成功标记
         self.x = 1
+        count = 0
 
         while link_list:
             pop = link_list.pop(0)  # 提取一条链接并从原始列表删除
-            link = pop[0]  # url
+            link = pop[0]   # url
             title = pop[1]  # title
             count = pop[2]  # id
             try:
                 page_text, title, direction = self.extract_text(link, title, count)
             except BaseException as err:
-                self.loggings.error('URL{} requests failed, {} {} {}'.format(args.retry, title, link, str(err)))
-                Error_url.append('requests failed ' + ' '.join([str(count), title, link, str(err)]))
+                # raise err
+                self.loggings.error('URL{} requests failed, {} {} {}'.format(self.args.retry, title, link, str(err)))
+                self.Error_url.append('requests failed ' + ' '.join([str(count), title, link, str(err)]))
             else:
-                if self.args.direction and direction:
+                if self.args.direction and direction:                   # 成功获得下一页url
                     link_list.append([direction, title, count + 1])
                     self.loggings.debug('找到下一页 %s' % direction)
+                    self.direction_status = True
 
                 if page_text is None:  # 内容内空
                     msg = '%s No valid text to extract, possibly invalid pages, ' \
                           'or to confirm that a requested site needs to log in.' % title
-                    if direction is False and args.s:
+                    if direction is False and self.args.s:
                         raise IndexError(msg)
                     else:
                         self.loggings.warning(msg)
                 else:  # 内容非空
-                    if args.email:  # 邮件发送
-                        email = send_email(page_text, title=title, to_addr=args.email)
+                    if self.args.email and self.direction_status is False and self.args.s:   # 邮件发送 单页面时
+                        email = send_email(page_text, title=title, to_addr=self.args.email)
                         email.send()
-                    if args.dest == 'file' or args.dest == 'all':  # 写入文件
+                    if self.args.dest == 'file' or self.args.dest == 'all':                       # 写入文件
                         wr = self.write_text(count, title, page_text, page_count)
                         if wr is not True:
-                            Unable_write.append('Write failed ' + ' '.join([str(count), title, link, str(wr)]))
-                    if args.dest == 'terminal' or args.dest == 'all':  # 控制台输出
+                            self.Unable_write.append('Write failed ' + ' '.join([str(count), title, link, str(wr)]))
+                    if self.args.dest == 'terminal' or self.args.dest == 'all':                   # 控制台输出
                         self.output_text_terminal(page_text)
         if self.drawing:
             time.sleep(1)
             self.Draw.put(None)  # 确保绘图子进程结束后主线程可以退出
-            self.loggings.debug('多线程绘图进程已结束')
+            self.loggings.debug('多进程绘图进程已结束')
+
+        if self.direction_status and not self.args.dest == 'terminal':                              # 翻页成功 合并文件
+            self.text_merge(os.path.abspath('.'), merge_name=self.origin_url_title, make=self.args.direction)
+
+        if self.direction_status and self.args.email and not self.args.dest == 'terminal':          # 翻页成功且发送邮件
+            with open(self.origin_url_title_file, 'r', encoding='utf-8') as f:
+                email = send_email(text=f.read(), title=self.origin_url_title, to_addr=self.args.email)
+                email.send()
 
 
 def mu_th(links, page):
-    class mu_threading(threading.Thread):
+    class MuThreading(threading.Thread):
         def __init__(self):
             threading.Thread.__init__(self)
             self.daemon = True
 
         def run(self):
-            ext = ExtractText(args=args)
+            ext = ExtractText()
             ext.single_process(links, page_count=page)
 
     mu_list = []
     public.loggings.debug('chapter processing starts  ')
-    for num in range(os.cpu_count() * 2):
-        m = mu_threading()
+    for num in range(os.cpu_count() * args.m):
+        m = MuThreading()
         mu_list.append(m)
         m.start()  # 开始线程
     for mu in mu_list:
@@ -737,7 +837,7 @@ class draw_processing():
         self.queue = multiprocessing.Queue()
         self.mu = multiprocessing.Process(target=self.work, args=(self.queue,))
         self.mu.start()
-        public.loggings.debug('多线程绘图进程已启动...')
+        public.loggings.debug('多进程绘图进程已启动...')
 
     def draw(self, c_blocks, name='test'):
         pyplot.plot(c_blocks)
@@ -750,7 +850,8 @@ class draw_processing():
             value = q.get(block=True)
             if value is None:
                 break
-            if mat_import: continue
+            if mat_import:
+                continue
             title = 'The {}th text distribution function'.format(str(self.n + 1))
             self.mu_list[str(self.n)] = multiprocessing.Process(target=self.draw, args=(value, title))
             self.mu_list[str(self.n)].daemon = False  # False保证主线程不会结束
@@ -765,146 +866,9 @@ class draw_processing():
         self.queue.put(sequence)
 
 
-class qidian_conf():
-    def __init__(self):
-        self.ISOTIMEFORMAT = '%Y-%m-%d %X'
-        self.save_path = os.path.join('.', public.down_path)
-
-    # # 通用装饰器1
-    # def writeBook(self, func):
-    #     def swr(*args, **kw):
-    #         f = open(os.path.join(self.save_path, args[-1] + '.txt'), 'a+', encoding='utf-8')
-    #         f.write('\n\n')
-    #         result = func(*args, **kw)
-    #         f.write('>')
-    #         return result
-    #
-    #     return swr
-
-    # 创建文件并定义名称
-    def createBook(self, bookName):
-        f = open(os.path.join(self, self.save_path, bookName + '.txt'), 'a', encoding='utf-8')
-
-    # 写卷目录
-    def createTitle(self, title, bookName):
-        f = open(os.path.join(self, self.save_path, bookName + '.txt'), 'a', encoding='utf-8')
-        f.write('\n\n### ' + title)
-
-    # 写每卷中对应的章节目录
-    def writeZhangjie(self,menuContentBs, bookName, i):
-        menuZhangJie = menuContentBs.find_all("div", "box_cont")[1:]
-        menuZhangJieS = BeautifulSoup(str(menuZhangJie[i]), 'html.parser')
-        menuZhangJieSpan = menuZhangJieS.find_all('span')
-        menuZhangJieHref = menuZhangJieS.find_all('a')
-        menuZhangJieHrefList = self.getHref(menuZhangJieHref)
-        self.writeZhangjieDetail(menuZhangJieSpan, bookName, menuZhangJieHrefList)
-
-    def writeZhangjie2(self, menuContentBs, bookName, i):
-        menuZhangJie = menuContentBs.find_all("div", "box_cont")[0:]
-        menuZhangJieS = BeautifulSoup(str(menuZhangJie[i]), 'html.parser')
-        menuZhangJieSpan = menuZhangJieS.find_all('span')
-        menuZhangJieHref = menuZhangJieS.find_all('a')
-        menuZhangJieHrefList = self.getHref(menuZhangJieHref)
-        self.writeZhangjieDetail(menuZhangJieSpan, bookName, menuZhangJieHrefList)
-
-    # 写章节细节和每章内容的方法(还有点问题)
-
-    def writeZhangjieDetail(self,menuZhangJieSpan, bookName, menuZhangJieHrefList):
-        x = 0
-        for spanValue in menuZhangJieSpan:
-            # timeout = random.choice(range(80, 180)) / 100
-            # loggings.debug('延时：' + str(timeout))
-
-            spanValue = BeautifulSoup(str(spanValue), 'html.parser').get_text()
-
-            public.loggings.debug('{:<3}{:<20}{:<12}{:<}'.format(str(x), spanValue, '--执行到此章节--', str(
-                time.strftime(self.ISOTIMEFORMAT, time.localtime()))))  # 打印已经写到哪个章节
-            f = open(os.path.join(self.save_path, bookName + '.txt'), 'a', encoding='utf-8')
-            f.write('\n\n---')
-            f.write('\n\n#### ' + spanValue + '\n\n')
-            try:
-                # chapterCode = urllib.request.urlopen(menuZhangJieHrefList[j]).read()
-                re_chapter = requests.get(menuZhangJieHrefList[x])
-                chapterCode = re_chapter.content
-
-                re_chapter.close()
-                chapterSoup = BeautifulSoup(chapterCode, 'html.parser')  # 使用BS读取解析网页代码
-                chapterResult = chapterSoup.find(id='chaptercontent')  # 找到id='chaptercontent'的节点
-                chapterResultChilds = chapterResult.children
-
-                story_src = BeautifulSoup(str(list(chapterResultChilds)[3]), "html.parser")
-                fileurl = story_src.contents[0].attrs['src']
-
-                file_re = requests.get(fileurl)
-                file_content = file_re.content
-                file_bs = BeautifulSoup(file_content, 'html5lib')
-                text_file = str(file_bs)
-                file_re.close()
-                text_file = re.sub('<[\s\S]*?>|[ \t\r\f\v]', '', text_file)
-                text_file = re.sub('\S+\(|\);|\\n+', '', text_file)
-                text_file = re.sub('起点中文.*', '', text_file)
-
-                text_file = text_file.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
-                f.write(text_file)
-            except BaseException as err:
-                f.write('章节丢失')
-                public.loggings.error('章节丢失 %s' % str(err))
-            x += 1
-
-    # 获取各个章节的URL
-    def getHref(self, menuZhangJieHref):
-        menuZhangJieHrefList = []
-        for index in menuZhangJieHref:
-            menuZhangJieHrefList.append(index.get('href'))
-        return menuZhangJieHrefList
-
-    def write(self, menuContentBs, menu, n):
-        i = 0
-        for index in menu:
-            MuLu = BeautifulSoup(str(index), 'html.parser')
-            MLb = MuLu.find('b')
-            MuLua = BeautifulSoup(str(MLb), 'html.parser')
-            MLa = MuLua.find('a')
-            forTitle = BeautifulSoup(str(MLa), 'html.parser')
-            muluTitle = MuLua.get_text()
-            bookName = forTitle.get_text()
-            self.createBook(bookName)
-            self.createTitle(muluTitle, bookName)
-            # MD文件和卷标题写好，就要写入正式的章节目录和文本内容
-            if n == 0:
-                self.writeZhangjie2(menuContentBs, bookName, i)
-            else:
-                self.writeZhangjie(menuContentBs, bookName, i)
-            print(str(i + 1), 'xx', '--执行到此目录', str(time.strftime(self.ISOTIMEFORMAT, time.localtime())))  # 打印已经写入的目录
-            i += 1
-            # time.sleep(1)
-
-    def main(self, url):
-        public.try_mkdir(self.save_path)
-
-        webStory = urllib.request.urlopen(url).read().decode('utf8', errors='replace')  # 获取整个网页
-
-        public.loggings.debug('开始：' + time.strftime(self.ISOTIMEFORMAT, time.localtime()))
-        soup = BeautifulSoup(webStory, 'html.parser')                       # 解析整个网页
-        menuContent = soup.find_all(id="content")                           # 获取解析好的网页上id位content的元素
-        # menuContentStr = ','.join(str(v) for v in menuContent)            #将 menuContent转换为str 如果有多个
-        menuContentBs = BeautifulSoup(str(menuContent), 'html.parser')      # 解析转换好的menuContentStr为bs对象
-
-        menu = menuContentBs.find_all("div", "box_title")[0:1]
-        if ('正文卷' in BeautifulSoup(str(menu), 'html.parser').get_text()):
-            menu = menuContentBs.find_all("div", "box_title")[0:]           # 从解析好的bs对象中获取是div且class为box_title的元素
-            self.write(menuContentBs, menu, 0)
-        else:
-            menu = menuContentBs.find_all("div", "box_title")[1:]           # 从解析好的bs对象中获取是div且class为box_title的元素
-            self.write(menuContentBs, menu, 1)
-        # soup2 = bs(str(menu),'html.parser')                               #转换为bs对象
-
-        public.loggings.info('结束：' + str(time.strftime(self.ISOTIMEFORMAT, time.localtime())))
-
-
 class send_email(FeaturesList):
     def __init__(self, text='', title='', to_addr='sonny_yang@kindle.cn'):
-        FeaturesList.__init__(self)
+        FeaturesList.__init__(self, args)
         # 发件人
         self.from_addr = 'it_yangsy@ish.com.cn'
         # 发件人密码
@@ -969,55 +933,58 @@ class send_email(FeaturesList):
     def send(self):
         self.__sendmail()
 
-
-class UrlAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        global html_url
-        html_url = values[0]
-        setattr(namespace, self.dest, values)
+# class UrlAction(argparse.Action):
+#     def __call__(self, parser, namespace, values, option_string=None):
+#         global html_url
+#         html_url = values[0]
+#         setattr(namespace, self.dest, values)
 
 
 def args_parser():
     parse = argparse.ArgumentParser(prog='Text fetching', description='文本抓取使用方法',
                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     ''''''
-    parse_url_group = parse.add_mutually_exclusive_group()
+    parse_url_group = parse.add_mutually_exclusive_group(required=True)
     parse_url_group.add_argument('-c', metavar='catalog url', nargs=1, type=str,
                                  help='目录页地址，下载小说通常为所有章节的目录页url')
     parse_url_group.add_argument('-s', metavar='single url', nargs=1, type=str,
                                  help='文本页URL, 抓取单一url的文本内容')
     ''''''
-    parse.add_argument('-p', dest='direction', choices=['up', 'down'], default=False, help='尝试向前或向后翻页')
-    parse.add_argument('-r', nargs=1, dest='retry', type=int, choices=range(0, 8), default=3, help='最大请求失败重试次数')
-    parse.add_argument('-debug', nargs=1, type=int, choices=range(0, 4), default=[3],
+    parse.add_argument('-pn', dest='direction', choices=['up', 'down'], default=default_args['pn'], help='尝试向前或向后翻页')
+    parse.add_argument('-pv', nargs='?', type=int, choices=range(2, 6), default=default_args['pv'], help='翻页参数，不同页的有效内容最大相差比')
+    parse.add_argument('-r', nargs=1, dest='retry', type=int, choices=range(0, 8), default=[default_args['r']], help='最大请求失败重试次数')
+    parse.add_argument('-m', type=int, choices=range(1, 6), default=default_args['m'], help='多线程倍数, N = m x cpu')
+    parse.add_argument('-debug', nargs=1, type=int, choices=range(0, 4), default=[default_args['debug']],
                        help='debug功能，0关闭，1输出到控制台，2输出到文件，3同时输出')
 
     switch_group = parse.add_argument_group(title='高级选项', description='针对不同的情况调整策略以获得最佳效果, 参数只需要输入开头即可')
-    switch_group.add_argument('-b', dest='block_size', type=int, choices=range(2, 10), default=5,
+    switch_group.add_argument('-b', dest='block_size', type=int, choices=range(2, 12), default=default_args['block_size'],
                               help='文本行块分布函数块大小，值越小筛选越严格，获得的内容可能越少，适用于正文密集度高，反之同理')
-    switch_group.add_argument('--drawing', action='store_const', const=True, default=False,
+    switch_group.add_argument('--drawing', action='store_const', const=True, default=default_args['drawing'],
                               help='绘制文本分布函数图，图形化上一个选项的文本块分布函数，可调整不同值做对比，仅在文本页-s模式有效')
     switch_group.add_argument('--blank-remove', dest='leave_blank', action='store_const', const=False,
-                              default=True, help='删除文本中的空格与空行，默认保留')
-    switch_group.add_argument('--image-remove', dest='image', action='store_const', const=True, default=False,
+                              default=default_args['leave_blank'], help='删除文本中的空格与空行，默认保留')
+    switch_group.add_argument('--image-remove', dest='image', action='store_const', const=True, default=default_args['image'],
                               help='保留正文中的图片链接，默认删除')
-    switch_group.add_argument('--ad-remove', dest='ad_rem', action='store_const', const=False, default=True,
+    switch_group.add_argument('--ad-remove', dest='ad_rem', action='store_const', const=False, default=default_args['ad_rem'],
                               help='关闭 删除广告及推广 功能，默认删除广告')
-    switch_group.add_argument('--repeat', nargs='?', type=int, choices=range(2, 6), const=2, default=False,
+    switch_group.add_argument('-loop', nargs='?', type=int, choices=range(2, 6), const=2, default=default_args['loop'],
                               help='启用循环过滤，对页面进行多次筛选，适合有多段落的情况，预设值为不小于首段文本长度的1/2')
-    switch_group.add_argument('-email', metavar='xx@abc.com', nargs='?', const='sonny_yang@kindle.cn', default=False,
-                              help='将获取的正文以邮件附件的形式发送到收件人, 不输入邮件地址发送到预设邮箱 %(const)s')
-    switch_group.add_argument('-dest', choices=['off', 'file', 'terminal', 'all'], default='file',
+    switch_group.add_argument('-email', metavar='xx@abc.com', nargs='?', const=default_args['email_to_address'],
+                              default=default_args['email'], help='将获取的正文以邮件附件的形式发送到收件人, 不输入邮件地址发送到预设邮箱 %(const)s')
+    switch_group.add_argument('-dest', choices=['off', 'file', 'terminal', 'all'], default=default_args['dest'],
                               help='将内容输出到指定目标 %(choices)s')
 
     parse.add_argument('--version', action='version', version='%(prog)s 0.6', help='显示版本号')
-    debug = ' -s https://git-scm.com/book/zh/v1/Git-%E5%88%86%E6%94%AF-%E5%88%86%E6%94%AF%E7%9A%84%E6%96%B0%E5%BB%BA%E4%B8%8E%E5%90%88%E5%B9%B6  -debug  1  --dr'.split()
-    # debug = None
-    args_ = parse.parse_args(debug)
-
+    ide_debug = '-s http://beautifulsoup.readthedocs.io/zh_CN/latest/   -b 10 --dr -loo 5'.split()
+    # ide_debug = '-c http://www.52dsm.com/chapter/6712.html'.split()
+    ide_debug = None
+    args_ = parse.parse_args(ide_debug)
+    args_.debug = args_.debug[0]
+    args_.retry = args_.retry[0]
     if args_.c:
         args_.drawing = False               # 抓取目录-c模式下关闭绘图功能
-        args_.direction = False             # 抓取目录-c模式下关闭一页功能
+        args_.direction = False             # 抓取目录-c模式下关闭下一页功能
         args_.c = args_.c[0]
     elif args_.s:
         args_.s = args_.s[0]
@@ -1027,7 +994,7 @@ def args_parser():
 
 if __name__ == '__main__':
     args = args_parser()
-    public = FeaturesList()
-    public.init_logs(public.loggings, args.debug[0])
-    Ext = ExtractText(args=args)
+    public = FeaturesList(args=args)
+    public.init_logs(public.loggings, args.debug)
+    Ext = ExtractText()
     Ext.start_work()
