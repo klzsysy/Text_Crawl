@@ -40,21 +40,26 @@ else:
 默认参数配置，具体用途及可选参数可在args_parser函数中查看
 """
 default_args = {
-    'pn': False,                                    # 尝试翻页
+    'pn': False,                                    # 开启尝试翻页
     'pv': 2,                                        # 翻页时不同段落的有效比例1/pv, 即最长与最短文本段落的比例
     'r': 3,                                         # 最大重试次数
     'debug': 3,                                     # 0关闭，1输出到控制台，2输出到文件，3同时输出
-    'block_size': 4,                                # 文本行块分布函数块大小
+    'block_size': 5,                                # 文本行块分布函数块大小
     'drawing': False,                               # 显示文本块函数
     'leave_blank': True,                            # 保留空格与空行
     'image': False,                                 # 保留图片URL
     'ad_rem': True,                                 # 删除可能的广告
     'loop': False,                                  # 对页面进行多次筛选 适合有多段文本
-    'email': False,                                 # 将结果发送邮件发送
-    'email_to_address': 'sonny_yang@kindle.cn',     # 默认邮件收件人
     'dest': 'file',                                 # 结果输出位置
     'min_text_length': 100,                         # 页面最长文本段落的最小长度 小于这个值的将丢弃
-    'm': 2                                          # 多线程数量  m x cpu
+    'm': 2,                                         # 多线程数量  m x cpu
+    # 邮件相关配置
+    'email': False,                                     # 将结果发送邮件发送
+    'email_to_address':     'sonny_yang@kindle.cn',     # 默认邮件收件人，可多人 用;分割
+    'email_server':         'smtp.xxxx.cn',             # smtp服务器
+    'email_from_address':   'abc@cc.com',               # 发件账户
+    'email_from_password':  'xxxxx',                    # 发件账户密码
+    'email_title':          'Convert'                   # 邮件title
 }
 
 
@@ -66,6 +71,7 @@ class FeaturesList(object):
         self.args = args
         self.Error_url = ['']
         self.Unable_write = ['']
+
 
     def init_logs(self, logs, lev=1):
         """
@@ -128,7 +134,7 @@ class FeaturesList(object):
                     return int_s
                 file_names.sort(key=num)
 
-            self.loggings.debug('The merged text starts...')
+        self.loggings.debug('The merged text starts...')
         with open(os.path.join(path, "fileappend.tmp"), "a", encoding='utf-8') as dest:
             first = False
             for filename in fnmatch.filter(file_names, '*.txt'):
@@ -145,6 +151,21 @@ class FeaturesList(object):
 
         os.rename(os.path.join(path, "fileappend.tmp"), merge_name)
         self.loggings.debug('Text merged successfully:[%s]' % os.path.join(path, merge_name))
+
+    def textcache_merge(self, text_list, make=False):
+        first = False
+        merge_text = ''
+        self.loggings.debug('处理缓存的文本')
+        for n, one_page in enumerate(text_list, 1):
+            if first:
+                if make:
+                    segmentation = '\n\n# {0} 第{1}页{0} \n\n'.format('-' * 12, n)
+                else:
+                    segmentation = '\n\n# {0}\n\n'.format('-' * 18)
+                merge_text += segmentation
+            first = True
+            merge_text += one_page
+        return merge_text
 
     def get_url_to_bs(self, url, re_count=0, ignore=False):
         """
@@ -230,21 +251,25 @@ class FeaturesList(object):
         self.try_mkdir(self.down_path)
         if text is None or text == '':
             return True
-        title = re.sub(r'[/\\:\*\?\"<>\|]', '-', title)  # 过滤文件名非法字符
+        title = re.sub(r'[/\\:\*\?\"<>\|]', '-', title)                             # 过滤文件名非法字符
         if self.args.s and count == 1000 and self.args.direction is False:
             filename_format = '.\{}\{}.txt'.format(self.down_path, title)
         else:
             filename_format = '.\{0}\{1:<{2}} {3}.txt'.format(self.down_path, str(count), len(str(page_count)), title)
 
-        try:
-            with open(filename_format, 'w', encoding='utf-8') as f:
-                f.write(text)
-            self.loggings.debug('The text was successfully written to the file [%-4s %s]' % (count, title))
-        except BaseException as err:
-            return err
-        else:
-            self.saved_filename.append(filename_format.split('\\')[-1])
-            return True
+        if self.args.s:                                                             # 单页模式缓存文本内容
+            text_cache.append(text)
+
+        if not self.args.dest == 'terminal':
+            try:
+                with open(filename_format, 'w', encoding='utf-8') as f:
+                    f.write(text)
+                self.loggings.debug('The text was successfully written to the file [%-4s %s]' % (count, title))
+            except BaseException as err:
+                return err
+            else:
+                self.saved_filename.append(filename_format.split('\\')[-1])
+                return True
 
     def try_mkdir(self, path):
         if not os.path.isdir(path):
@@ -686,7 +711,7 @@ class ExtractText(FeaturesList):
         self.loggings.debug('Start Read %s' % page_link + page_tiele)
         self.page_soup, protocol, _, _, _ = self.get_url_to_bs(page_link, re_count=self.args.retry)
         get_page_tiele = self.page_soup.title.get_text()
-        if page_tiele == '':
+        if page_tiele == '' or self.args.direction:
             page_tiele = get_page_tiele
             if self.direction_status is False:
                 self.origin_url_title = page_tiele
@@ -710,7 +735,7 @@ class ExtractText(FeaturesList):
         self.loggings.debug('Page text filtering is complete [%s]' % page_tiele)
 
         if text is None:
-            return text, page_tiele, None
+            return text, page_tiele, direction_url
         text = page_tiele + '\n\n' + text
         """编码转换 极为重要，编码成utf-8后解码utf-8 并忽略错误的内容"""
         text = text.encode('utf-8').decode('utf-8', 'ignore')
@@ -733,7 +758,7 @@ class ExtractText(FeaturesList):
                 self.text_merge(os.path.abspath('.'), merge_name=self.origin_url_title)  # 合并文本
                 if self.args.email:
                     with open(self.origin_url_title_file, 'r') as f:
-                            email = send_email(text=f.read(), title=self.origin_url_title, to_addr=self.args.email)
+                            email = send_email(text=f.read(), title=self.origin_url_title, to_addr=self.args.email, url=args.c)
                             email.send()
 
         if len(self.Unable_write) == 1 and len(self.Error_url) == 1:
@@ -764,34 +789,32 @@ class ExtractText(FeaturesList):
             title = pop[1]  # title
             count = pop[2]  # id
             try:
-                page_text, title, direction = self.extract_text(link, title, count)
+                page_text, title, direction_url = self.extract_text(link, title, count)
             except BaseException as err:
                 # raise err
                 self.loggings.error('URL{} requests failed, {} {} {}'.format(self.args.retry, title, link, str(err)))
                 self.Error_url.append('requests failed ' + ' '.join([str(count), title, link, str(err)]))
             else:
-                if self.args.direction and direction:                   # 成功获得下一页url
-                    link_list.append([direction, title, count + 1])
-                    self.loggings.debug('找到下一页 %s' % direction)
+                if self.args.direction and direction_url:                   # 成功获得下一页url
+                    link_list.append([direction_url, title, count + 1])
+                    self.loggings.debug('找到下一页 %s' % direction_url)
                     self.direction_status = True
 
                 if page_text is None:  # 内容内空
-                    msg = '%s No valid text to extract, possibly invalid pages, ' \
-                          'or to confirm that a requested site needs to log in.' % title
-                    if direction is False and self.args.s:
-                        raise IndexError(msg)
-                    else:
-                        self.loggings.warning(msg)
+                    msg = '%s %s \nNo valid text to extract, possibly invalid pages, ' \
+                          'or to confirm that a requested site needs to log in.' % (title, link)
+                    self.loggings.warning(msg)
+                    if not direction_url and self.args.s and len(text_cache) == 0:
+                        self.Error_url.append(msg)
+
                 else:  # 内容非空
-                    if self.args.email and self.direction_status is False and self.args.s:   # 邮件发送 单页面时
-                        email = send_email(page_text, title=title, to_addr=self.args.email)
-                        email.send()
-                    if self.args.dest == 'file' or self.args.dest == 'all':                       # 写入文件
-                        wr = self.write_text(count, title, page_text, page_count)
-                        if wr is not True:
-                            self.Unable_write.append('Write failed ' + ' '.join([str(count), title, link, str(wr)]))
-                    if self.args.dest == 'terminal' or self.args.dest == 'all':                   # 控制台输出
+                    if not self.args.dest == 'file':                                                # 控制台输出
                         self.output_text_terminal(page_text)
+
+                    wr = self.write_text(count, title, page_text, page_count)                       # 写入文件
+                    if wr is not True:
+                        self.Unable_write.append('Write failed ' + ' '.join([str(count), title, link, str(wr)]))
+
         if self.drawing:
             time.sleep(1)
             self.Draw.put(None)  # 确保绘图子进程结束后主线程可以退出
@@ -800,9 +823,10 @@ class ExtractText(FeaturesList):
         if self.direction_status and not self.args.dest == 'terminal':                              # 翻页成功 合并文件
             self.text_merge(os.path.abspath('.'), merge_name=self.origin_url_title, make=self.args.direction)
 
-        if self.direction_status and self.args.email and not self.args.dest == 'terminal':          # 翻页成功且发送邮件
-            with open(self.origin_url_title_file, 'r', encoding='utf-8') as f:
-                email = send_email(text=f.read(), title=self.origin_url_title, to_addr=self.args.email)
+        if self.args.email and len(text_cache) > 0:                                                 # 发送邮件
+                cache = self.textcache_merge(text_cache, make=True)
+                email = send_email(text=cache, title=self.origin_url_title, to_addr=self.args.email,
+                                   url=[x for x in [self.args.c, self.args.s] if x][0])             # 原始URL
                 email.send()
 
 
@@ -867,17 +891,17 @@ class draw_processing():
 
 
 class send_email(FeaturesList):
-    def __init__(self, text='', title='', to_addr='sonny_yang@kindle.cn'):
+    def __init__(self, text='', title='', to_addr=default_args['email_to_address'] , url=''):
         FeaturesList.__init__(self, args)
         # 发件人
-        self.from_addr = 'it_yangsy@ish.com.cn'
+        self.from_addr = default_args['email_from_address']
         # 发件人密码
-        self.password = 'klzsysy'
+        self.password = default_args['email_from_password']
         # 收件人列表
         self.to_addr = self.__split_addr(to_addr)
-
+        self.url = url
         self.mail_title = title
-        self.smtp_server = 'smtp.ish.com.cn'
+        self.smtp_server = default_args['email_server']
         # 退信收件人列表
         # self.bounce_addr = self._split_addr(bounce_addr)
         from io import BytesIO
@@ -899,11 +923,11 @@ class send_email(FeaturesList):
     def __sendmail(self):
 
         self.msg = MIMEMultipart()
-        self.msg.attach(MIMEText('给我发到kindle', 'plain', 'utf-8'))
+        self.msg.attach(MIMEText('hi!\n    附件文本来自以下链接\n    %s ' % self.url, 'plain', 'utf-8'))
 
         self.msg['From'] = self.__format_addr('Python Program <%s>' % self.from_addr)
         self.msg['To'] = ';'.join(self.to_addr)
-        self.msg['Subject'] = Header('Convert', 'utf-8').encode()
+        self.msg['Subject'] = Header(default_args['email_title'], 'utf-8').encode()
 
         self.mime = MIMEBase('text', 'txt', filename=self.mail_title + '.txt')
         self.mime.add_header('Content-Disposition', 'attachment', filename=self.mail_title + '.txt')
@@ -973,12 +997,12 @@ def args_parser():
     switch_group.add_argument('-email', metavar='xx@abc.com', nargs='?', const=default_args['email_to_address'],
                               default=default_args['email'], help='将获取的正文以邮件附件的形式发送到收件人, 不输入邮件地址发送到预设邮箱 %(const)s')
     switch_group.add_argument('-dest', choices=['off', 'file', 'terminal', 'all'], default=default_args['dest'],
-                              help='将内容输出到指定目标 %(choices)s')
+                              help='将内容输出到指定目标 %(choices)s，输出到终端时-c模式不能同时发送邮件')
 
     parse.add_argument('--version', action='version', version='%(prog)s 0.6', help='显示版本号')
-    ide_debug = '-s http://beautifulsoup.readthedocs.io/zh_CN/latest/   -b 10 --dr -loo 5'.split()
-    # ide_debug = '-c http://www.52dsm.com/chapter/6712.html'.split()
-    ide_debug = None
+    # ide_debug = '-s http://beautifulsoup.readthedocs.io/zh_CN/latest/   -b 10 --dr -loo 5 -email klzs@163.com'.split()
+    ide_debug = '-s http://lgqm.huiji.wiki/wiki/%E5%A5%94%E5%90%91%E5%B9%B8%E7%A6%8F%E6%96%B0%E7%A4%BE%E4%BC%9A -email klzsysy@163.com'.split()
+    # ide_debug = None
     args_ = parse.parse_args(ide_debug)
     args_.debug = args_.debug[0]
     args_.retry = args_.retry[0]
@@ -994,6 +1018,7 @@ def args_parser():
 
 if __name__ == '__main__':
     args = args_parser()
+    text_cache = []
     public = FeaturesList(args=args)
     public.init_logs(public.loggings, args.debug)
     Ext = ExtractText()
