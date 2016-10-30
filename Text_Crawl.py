@@ -1001,8 +1001,7 @@ def args_parser():
 
     parse.add_argument('--version', action='version', version='%(prog)s 0.6', help='显示版本号')
     # ide_debug = '-s http://beautifulsoup.readthedocs.io/zh_CN/latest/   -b 10 --dr -loo 5 -email klzs@163.com'.split()
-    ide_debug = '-s http://lgqm.huiji.wiki/wiki/%E5%A5%94%E5%90%91%E5%B9%B8%E7%A6%8F%E6%96%B0%E7%A4%BE%E4%BC%9A -email klzsysy@163.com'.split()
-    # ide_debug = None
+    ide_debug = None
     args_ = parse.parse_args(ide_debug)
     args_.debug = args_.debug[0]
     args_.retry = args_.retry[0]
