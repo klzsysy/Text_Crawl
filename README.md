@@ -38,7 +38,7 @@
 ```
 >python Text_Crawl -s http://tieba.baidu.com/p/4794348007 -loop -pn down -pv 3 --blank-remove
 ```
-* 抓取一个包含代码的页面，目的是抓取正文并保留缩进。观察这个页面可发现正文较为分散，因为需要尝试不同的参数已获得最佳效果。-b是过滤算法的块参数，越大越包容，越小则丢弃越多，--dr绘图显示页面文本的分布函数 以便调整参数，-loop 5最长段落与最短相差不超过5倍，dest 直接在终端输出结果。
+* 抓取一个包含代码的页面，目的是抓取正文并保留缩进。观察这个页面可发现正文较为分散，因此可能需要尝试不同的参数以获得最佳效果。-b是过滤算法的块参数，越大越包容，越小则丢弃越多，--dr绘图显示页面文本的分布函数 以便调整参数，-loop 5单页循环抓取并设定最长段落与最短相差不超过5倍，dest 直接在终端输出结果。
 ```
 >python Text_Crawl -s http://beautifulsoup.readthedocs.io/zh_CN/latest/ -b 10 --dr -loop 5 -dest terminal
 ```
