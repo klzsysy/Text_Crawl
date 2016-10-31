@@ -41,24 +41,24 @@ else:
 """
 default_args = {
     'pn': False,                                    # 开启尝试翻页
-    'pv': 2,                                        # 翻页时不同段落的有效比例1/pv, 即最长与最短文本段落的比例
-    'r': 3,                                         # 最大重试次数
+    'pv': 3,                                        # 翻页时不同长度段落的有效比例1/pv, 即最短文本不小于最长文本的pv倍
+    'r': 3,                                         # 最大失败重试次数
     'debug': 3,                                     # 0关闭，1输出到控制台，2输出到文件，3同时输出
     'block_size': 5,                                # 文本行块分布函数块大小
-    'drawing': False,                               # 显示文本块函数
-    'leave_blank': True,                            # 保留空格与空行
-    'image': False,                                 # 保留图片URL
-    'ad_rem': True,                                 # 删除可能的广告
-    'loop': False,                                  # 对页面进行多次筛选 适合有多段文本
+    'drawing': False,                               # 显示文本块函数，默认不显示
+    'leave_blank': True,                            # 保留空格与空行，默认开启
+    'image': False,                                 # 保留图片URL 默认关闭
+    'ad': True,                                     # 删除可能的广告，默认删除
+    'loop': False,                                  # 对页面进行多次筛选 适合有多段文本，默认关闭
     'dest': 'file',                                 # 结果输出位置
     'min_text_length': 100,                         # 页面最长文本段落的最小长度 小于这个值的将丢弃
     'm': 2,                                         # 多线程数量  m x cpu
     # 邮件相关配置
     'email': False,                                     # 将结果发送邮件发送
     'email_to_address':     'sonny_yang@kindle.cn',     # 默认邮件收件人，可多人 用;分割
-    'email_server':         'smtp.xxxx.cn',             # smtp服务器
-    'email_from_address':   'abc@cc.com',               # 发件账户
-    'email_from_password':  'xxxxx',                    # 发件账户密码
+    'email_server':         'smtp.xxx.com.cn',          # smtp服务器
+    'email_from_address':   'it_xxx@xx.com.cn',         # 发件账户
+    'email_from_password':  'xxx.xx',                   # 发件账户密码
     'email_title':          'Convert'                   # 邮件title
 }
 
@@ -270,6 +270,8 @@ class FeaturesList(object):
             else:
                 self.saved_filename.append(filename_format.split('\\')[-1])
                 return True
+        else:
+            return True
 
     def try_mkdir(self, path):
         if not os.path.isdir(path):
@@ -423,11 +425,6 @@ class FeaturesList(object):
             sys.exit(-1)
         else:
             self.loggings.debug('Open original url complete！')
-            # if 'qidian.com' in ori_domain:
-            #     self.loggings.info('Use "qidian" Configure')
-            #     qidian = self.qidian_conf()
-            #     qidian.main(ori_url)
-            #     sys.exit(0)
             self.origin_url_title = soup_text.title.string
             self.loggings.debug('Start the analysis original html doc...')
             get_page_links = self.get_page_links(soup_text, rest, protocol)
@@ -677,11 +674,15 @@ class ExtractText(FeaturesList):
         ad_list.append(self.page_soup.find_all('div', "core_reply j_lzl_wrapper"))
         ad_list.append(self.page_soup.find_all('div', 'weixin'))
         ad_list.append(self.page_soup.find_all('a', string=re.compile('纠错')))
-        ad_list.append(self.page_soup.find_all('div', class_=re.compile('region_bright my_app|novel-ranking-frs-body|topic_list_box')))
+        ad_list.append(self.page_soup.find_all('div', class_=re.compile
+        ('region_bright|region_bright my_app|novel-ranking-frs-body|topic_list_box|region-login')))
         ad_list.append(self.page_soup.find_all('li', class_=re.compile('l_badge')))
         for ad in ad_list:
             for x in ad:
-                x.decompose()      # 方法将当前节点移除文档树并完全销毁
+                xt = ' '.join([str(x) for x in x.strings])
+                _, n = re.subn('\n', '', xt)
+                if n == 0: n = 1
+                x.string = '{}'.format('\n' * n)      # 方法将当前节点用空行替换
 
     def read_qidian(self, page_link=''):
         """
@@ -808,9 +809,6 @@ class ExtractText(FeaturesList):
                         self.Error_url.append(msg)
 
                 else:  # 内容非空
-                    if not self.args.dest == 'file':                                                # 控制台输出
-                        self.output_text_terminal(page_text)
-
                     wr = self.write_text(count, title, page_text, page_count)                       # 写入文件
                     if wr is not True:
                         self.Unable_write.append('Write failed ' + ' '.join([str(count), title, link, str(wr)]))
@@ -823,11 +821,14 @@ class ExtractText(FeaturesList):
         if self.direction_status and not self.args.dest == 'terminal':                              # 翻页成功 合并文件
             self.text_merge(os.path.abspath('.'), merge_name=self.origin_url_title, make=self.args.direction)
 
-        if self.args.email and len(text_cache) > 0:                                                 # 发送邮件
+        if (self.args.email or not self.args.dest == 'file') and len(text_cache) > 0:               # 发送邮件与终端输出
                 cache = self.textcache_merge(text_cache, make=True)
-                email = send_email(text=cache, title=self.origin_url_title, to_addr=self.args.email,
-                                   url=[x for x in [self.args.c, self.args.s] if x][0])             # 原始URL
-                email.send()
+                if not self.args.dest == 'file':  # 控制台输出
+                    self.output_text_terminal(cache)
+                if self.args.email:
+                    email = send_email(text=cache, title=self.origin_url_title, to_addr=self.args.email,
+                                       url=[x for x in [self.args.c, self.args.s] if x][0])         # 原始URL
+                    email.send()
 
 
 def mu_th(links, page):
@@ -898,23 +899,15 @@ class send_email(FeaturesList):
         # 发件人密码
         self.password = default_args['email_from_password']
         # 收件人列表
-        self.to_addr = self.__split_addr(to_addr)
+        self.to_addr = [x.strip() for x in to_addr.split(';')]
         self.url = url
         self.mail_title = title
         self.smtp_server = default_args['email_server']
-        # 退信收件人列表
-        # self.bounce_addr = self._split_addr(bounce_addr)
+
         from io import BytesIO
         i = BytesIO()
         i.write(text.encode('utf-8'))
         self.text = i.getvalue()
-
-    def __split_addr(self, email_addr=''):
-        addr = []
-        for x in email_addr.split(';'):
-            x = x.strip()
-            addr.append(x)
-        return addr
 
     def __format_addr(self, s):
         name, addr = parseaddr(s)
@@ -990,8 +983,8 @@ def args_parser():
                               default=default_args['leave_blank'], help='删除文本中的空格与空行，默认保留')
     switch_group.add_argument('--image-remove', dest='image', action='store_const', const=True, default=default_args['image'],
                               help='保留正文中的图片链接，默认删除')
-    switch_group.add_argument('--ad-remove', dest='ad_rem', action='store_const', const=False, default=default_args['ad_rem'],
-                              help='关闭 删除广告及推广 功能，默认删除广告')
+    switch_group.add_argument('--ad', dest='ad_rem', action='store_const', const=False, default=default_args['ad'],
+                              help='保留页面的广告及推广信息，默认为删除广告减少干扰')
     switch_group.add_argument('-loop', nargs='?', type=int, choices=range(2, 6), const=2, default=default_args['loop'],
                               help='启用循环过滤，对页面进行多次筛选，适合有多段落的情况，预设值为不小于首段文本长度的1/2')
     switch_group.add_argument('-email', metavar='xx@abc.com', nargs='?', const=default_args['email_to_address'],
@@ -1000,8 +993,8 @@ def args_parser():
                               help='将内容输出到指定目标 %(choices)s，输出到终端时-c模式不能同时发送邮件')
 
     parse.add_argument('--version', action='version', version='%(prog)s 0.6', help='显示版本号')
-    # ide_debug = '-s http://beautifulsoup.readthedocs.io/zh_CN/latest/   -b 10 --dr -loo 5 -email klzs@163.com'.split()
-    ide_debug = None
+    ide_debug = '-s http://tieba.baidu.com/p/4835763412 -pn down -dest terminal --dr -loo -ema'.split()
+    ide_debug = None                        # 方便开启关闭在ide里模拟参数输入debug
     args_ = parse.parse_args(ide_debug)
     args_.debug = args_.debug[0]
     args_.retry = args_.retry[0]
