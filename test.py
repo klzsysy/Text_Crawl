@@ -319,3 +319,13 @@ up2 = htmlbs.find('a', class_=re.compile(r'[pP][rR]?[eE][vV]'))
 down = htmlbs.find('a', string = re.compile('下一|[nN][eE]?[xX][tT]|&gt;'))
 down2 = htmlbs.find('a', class_= re.compile(r'[nN][eE]?[xX][tT]'))
 pass
+
+
+def merge(switch=False):
+    def merge_func(func):
+        def wrapper(*args, **kwargs):
+            if switch:
+                pass
+            return func(*args, **kwargs)
+        return wrapper
+    return merge_func
