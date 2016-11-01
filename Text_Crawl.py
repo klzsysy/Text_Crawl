@@ -744,54 +744,57 @@ class ExtractText(FeaturesList):
                 if n == 0: n = 1
                 x.string = '{}'.format('\n' * n)      # 方法将当前节点用空行替换
 
-    def extract_text(self, page_link, page_tiele, page_id=0):
+    def extract_text(self, page_link, page_title, page_id=0):
         """
         请求URL并提取主要文本
         :return: UTF-8编码的字符串和页面标题
         """
         self.id = page_id
         direction_url = None
-        self.loggings.debug('Start Read %s' % page_link + page_tiele)
+        self.loggings.debug('Start Read %s' % page_link + page_title)
         self.page_soup, protocol, _, _, _, _ = self.get_url_to_bs(page_link, re_count=self.args.retry)
-        get_page_tiele = self.page_soup.title.get_text()
-        if page_tiele == '' or self.args.direction:
-            page_tiele = get_page_tiele
-            if self.direction_status is False:
-                self.origin_url_title = page_tiele
 
+        # 处理title
+        get_page_title = self.page_soup.title.get_text()
+        if page_title == '' or self.args.direction:
+            page_title = get_page_title
+            if self.direction_status is False:
+                self.loggings.debug('获取原始页title %s' % page_title)
+                self.origin_url_title = page_title
+
+        # 翻页
         if self.page_soup and self.args.direction:
             direction_url = self.next_page(self.page_soup, direction=self.args.direction)
             if direction_url:
                 direction_url = self.url_merge(page_url=page_link, raw_url=direction_url, protocol=protocol)
 
-        self.loggings.debug('Read Complete [%s]' % page_tiele)
+        self.loggings.debug('Read Complete [%s]' % page_title)
 
         if self.args.ad_rem:
             self.delete_ad()        # 去广告干扰
 
-        self.loggings.info('Start trying to filter the page text [%s]' % page_tiele)
+        self.loggings.info('Start trying to filter the page text [%s]' % page_title)
 
         text = self.read_qidian(page_soup=self.page_soup, page_link=page_link)
         if text is None:
             text = self.crawl_context()
 
-        self.loggings.debug('Page text filtering is complete [%s]' % page_tiele)
+        self.loggings.debug('Page text filtering is complete [%s]' % page_title)
 
         if text is None:
-            return None, page_tiele, direction_url
-        text = page_tiele + '\n\n' + text
+            return None, page_title, direction_url
+        text = page_title + '\n\n' + text
         """编码转换 极为重要，编码成utf-8后解码utf-8 并忽略错误的内容"""
         text = text.encode('utf-8').decode('utf-8', 'ignore')
-        return text, page_tiele, direction_url
+        return text, page_title, direction_url
 
     def start_work(self):
         """
         启动位置
         """
         if not self.args.c:
-            link_list = [[self.args.s, '', 1000]]
             page_count = 1
-            self.single_process(link_list, page_count)
+            self.single_process([['', self.args.s, 1000]], page_count)
         else:
             # 从目录页面提取所有章节URL
             links, page_count, domain = self.extract_contents_url(self.args.c, retry=self.args.retry)
@@ -813,7 +816,7 @@ class ExtractText(FeaturesList):
         public.loggings.debug('script complete, But there are some errors :(')
         try:
             terminal_size = os.get_terminal_size().columns - 1
-        except BaseException:
+        except Exception:
             terminal_size = 70
         public.loggings.info(
             '\n\n{0}\n{1}Error total:\n{2}\n{3}\n{4}'.format('+' * terminal_size, ' ' * int(terminal_size / 2 - 5),
@@ -832,7 +835,7 @@ class ExtractText(FeaturesList):
         while link_list:
             pop = link_list.pop(0)  # 提取一条链接并从原始列表删除
             title = pop[0]      # title
-            link = pop[1]       # link
+            link  = pop[1]       # link
             count = pop[2]      # id
             try:
                 page_text, title, direction_url = self.extract_text(link, title, count)
@@ -842,7 +845,7 @@ class ExtractText(FeaturesList):
                 self.Error_url.append('requests failed ' + ' '.join([str(count), title, link, str(err)]))
             else:
                 if self.args.direction and direction_url:                   # 成功获得下一页url
-                    link_list.append([direction_url, title, count + 1])
+                    link_list.append([title, direction_url, count + 1])
                     self.loggings.debug('找到下一页 %s' % direction_url)
                     self.direction_status = True
 
@@ -1006,7 +1009,8 @@ class send_email(FeaturesList):
 
 def args_parser():
     parse = argparse.ArgumentParser(prog='Text Crawl', description='文本抓取使用方法',
-                                    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+                                    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+                                    epilog='更多使用详情以及示例：https://github.com/klzsysy/Text_Crawl')
     ''''''
     parse_url_group = parse.add_mutually_exclusive_group(required=True)
     parse_url_group.add_argument('-c', metavar='catalog url', nargs=1, type=str,
@@ -1036,11 +1040,11 @@ def args_parser():
                               help='启用循环过滤，对页面进行多次筛选，适合有多段落的情况，预设值为不小于首段文本长度的1/2')
     switch_group.add_argument('-email', metavar='xx@abc.com', nargs='?', const=default_args['email_to_address'],
                               default=default_args['email'], help='将获取的正文以邮件附件的形式发送到收件人, 不输入邮件地址发送到预设邮箱 %(const)s')
-    switch_group.add_argument('-dest', choices=['off', 'file', 'terminal', 'all'], default=default_args['dest'],
+    switch_group.add_argument('-dest', choices=['file', 'terminal', 'all'], default=default_args['dest'],
                               help='将内容输出到指定目标 %(choices)s，输出到终端时-c模式不能同时发送邮件')
 
-    parse.add_argument('--version', action='version', version='%(prog)s 0.6', help='显示版本号')
-    ide_debug = '-c http://book.qidian.com/info/1003516610#Catalog'.split()
+    parse.add_argument('--version', action='version', version='%(prog)s 1.0.2', help='显示版本号')
+    ide_debug = '-s http://tieba.baidu.com/p/4835763412 -pn down -loo -dest terminal'.split()
     ide_debug = None                        # 方便开启关闭在ide里模拟参数输入debug
     args_ = parse.parse_args(ide_debug)
     args_.debug = args_.debug[0]
