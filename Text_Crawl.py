@@ -50,7 +50,7 @@ default_args = {
     'ad': True,                                     # 删除可能的广告，默认删除
     'loop': False,                                  # 对页面进行多次筛选 适合有多段文本，默认关闭
     'dest': 'file',                                 # 结果输出位置
-    'min_text_length': 100,                         # 页面最长文本段落的最小长度 小于这个值的将丢弃
+    'min_text_length': 100,                         # 页面最长文本段落的最小长度 小于这个值的将直接丢弃
     'm': 2,                                         # 多线程数量  m x cpu
     # 邮件相关配置
     'email': False,                                     # 将结果发送邮件发送
@@ -127,17 +127,7 @@ class FeaturesList(object):
         self.loggings.debug('Create a merge file')
         text_merge_path = os.path.join(path, self.down_path)
 
-        # file_names = sorted(saved_filename, key=lambda x: int(x[:len(x.split()[0])]))
-        # if len(file_names) == 0:
-        #     for _, _, file_names in os.walk(text_merge_path):
-        #         def num(s=''):
-        #             try:
-        #                 int_s = int(s[:len(s.split()[0])])
-        #             except BaseException:
-        #                 int_s = 0
-        #             return int_s
-        #         file_names.sort(key=num)
-
+        status = True
         self.loggings.debug('The merged text starts...')
         with open(os.path.join(path, "fileappend.tmp"), "a", encoding='utf-8') as dest:
             first = False
@@ -155,24 +145,29 @@ class FeaturesList(object):
                         shutil.copyfileobj(src, dest)
                 except FileNotFoundError as err:
                     self.loggings.error(str(err))
+                    self.loggings.debug('合并文件遇到错误，停止.')
+                    self.Unable_write.append(str(err))
+                    status = False
                     break
-
-        os.rename(os.path.join(path, "fileappend.tmp"), merge_name)
-        self.loggings.debug('Text merged successfully:[%s]' % os.path.join(path, merge_name))
+        if status:
+            os.rename(os.path.join(path, "fileappend.tmp"), merge_name)
+            self.loggings.debug('Text merged successfully:[%s]' % os.path.join(path, merge_name))
+        else:
+            os.remove(os.path.join(path, "fileappend.tmp"))
 
     def textcache_merge(self, text_list, make=False):
         first = False
         merge_text = ''
         self.loggings.debug('处理缓存的文本')
-        for n, one_page in enumerate(text_list, 1):
+        for one_page in text_list:
             if first:
                 if make:
-                    segmentation = '\n\n# {0} 第{1}页{0} \n\n'.format('-' * 12, n)
+                    segmentation = '\n\n# {0} 第{1}页{0} \n\n'.format('-' * 12, one_page[1])
                 else:
                     segmentation = '\n\n# {0}\n\n'.format('-' * 18)
                 merge_text += segmentation
             first = True
-            merge_text += one_page
+            merge_text += one_page[0]
         return merge_text
 
     def get_url_to_bs(self, url, re_count=0, ignore=False):
@@ -262,11 +257,13 @@ class FeaturesList(object):
         else:
             filename_format = '.\{0}\{1:<{2}} {3}.txt'.format(self.down_path, str(count), len(str(page_count)), title)
 
-        if self.args.s:                                                             # 单页模式缓存文本内容
-            text_cache.append(text)
+        if self.args.s:                                                             # 单页模式缓存文本内容并记录文件名
+            saved_filename.append(filename_format.split('\\')[-1])
+            text_cache.append([text, count-999])
 
         if not self.args.dest == 'terminal':
             try:
+                self.loggings.debug('Save Page To File: %s' % title)
                 with open(filename_format, 'w', encoding='utf-8') as f:
                     f.write(text)
                 self.loggings.debug('The text was successfully written to the file [%-4s %s]' % (count, title))
@@ -354,8 +351,8 @@ class FeaturesList(object):
                 url = down1.get('href')
             elif down2:
                 url = down2.get('href')
-
-        return url
+        if 'javascript' not in url:
+            return url
 
     class GetPageLinks(object):
         """
@@ -370,9 +367,11 @@ class FeaturesList(object):
             if len(self.content) == 0:
                 self.content = self.soup.find_all(id='chapterlist')
             if len(self.content) == 0:
-                self.content = self.soup.find_all('div', re.compile('centent|mainbody|catalog.box|volume-wrap'))
+                self.content = self.soup.find_all('div', re.compile('centent|mainbody|catalog.box|volume-wrap|index_area'))
+
             self.contentbs = BeautifulSoup(str(self.content), 'html5lib')
             self.urllist = self.contentbs.find_all('a')
+
 
         def special_treatment(self, raw):
             """
@@ -397,7 +396,7 @@ class FeaturesList(object):
                     continue
                 if re.search('分卷阅读', title):
                     continue
-                if re.search('订阅本卷', title):                            # 没登录 VIP章节直接丢弃
+                if re.search('订阅本卷|vip|VIP', title):                            # 没登录 VIP章节直接丢弃
                     break
                 page_rul.append([title, self.special_treatment(href_str)])
             # 合并函数          原始URL                   要组合的列表
@@ -434,8 +433,10 @@ class FeaturesList(object):
             get_page_links = self.GetPageLinks(soup_text, rest, protocol)
             all_page_links = self.read_qidian(page_soup=soup_text, page_link=ori_url, make='get_page_links')
             if all_page_links is None:
+                self.loggings.debug('开始通过通用方法获得所有url')
                 all_page_links = get_page_links.get_href(url_merge=self.url_merge)
             else:
+                self.loggings.debug('已通过qidian专用配置获得所有url')
                 return all_page_links, len(all_page_links), ori_domain               # 已经单独进行了处理
 
             def match_chinese(s):
@@ -444,7 +445,8 @@ class FeaturesList(object):
                 except AttributeError:
                     try:
                         re_s = int(re.match('[第卷]?\s*([0123456789]+[^.-])', s).group(1))
-                    except AttributeError:
+                    except Exception:
+                        self.loggings.warning('无法识别的页面标题：%s' % s)
                         re_s = '零'
                 except TypeError:
                     return s
@@ -492,7 +494,8 @@ class FeaturesList(object):
         """
         起点中文网专用配置，该网站正文需要二次抓取, 每个章节URL有两种存在形式
         """
-        if 'qidian.com' in page_link:
+        if re.search('qidian\.com|qdmm\.com', page_link):           # 起点站点专用
+            self.loggings.debug('开始通过qidian专用配置读取正文...')
             if make == 'tow_get_text':
                 page_text = page_soup.find(id='chaptercontent')
                 page_text = page_text.contents[3]
@@ -505,7 +508,7 @@ class FeaturesList(object):
                     page_text = re.sub('起点中文.*', '', page_text).strip()
                     return page_text
                 else:
-                    raise requests.ConnectionError('read failed {}{}'.format(page_link, code))
+                    raise requests.ConnectionError('Read failed {}{}'.format(page_link, code))
             if make == 'get_page_links':
                 import json
                 try:
@@ -533,7 +536,7 @@ class FeaturesList(object):
                             links.append(x)
                             n += 1
                 except Exception as err:
-                    raise err
+                    self.loggings.warning('通过专用配置读取所有URL失败. %s' % str(err))
                 else:
                     '''过滤出免费可读取的章节 丢掉Vip内容'''
                     filter_links = [x for x in links if links.index(x) > 0 and not links[links.index(x)-1][1] == x[1]]
@@ -554,6 +557,7 @@ class ExtractText(FeaturesList):
         self.reBODY = re.compile(r'<body.*?>([\s\S]*?)<\/body>', re.I)
         self.reCOMM = r'<!--.*?-->'
         self.reTRIM = r'<{0}.*?>([\s\S]*?)<\/{0}>'
+        self.reLINK = r'<.*?>'
         if self.args.leave_blank:
             self.reTAG = r'<[\s\S]*?>|[\t\r\f\v]'   # 保留空格和空行
         else:
@@ -608,14 +612,13 @@ class ExtractText(FeaturesList):
         '''生成块列表'''
         for x in range(len(self.c_texts) - self.blocks_size + 1):
             self.c_blocks.append(sum([len(y) for y in self.c_texts[x:x + self.blocks_size]]))
-
+        self.loggings.debug('len(c_blocks) = %s' % len(self.c_blocks))
         # 首次过滤最长的文本段没有达到预定义的长度 则视为太短抛弃
         if max(self.c_texts_length) <= self.min_text_length and not self.recursion:
             self.loggings.debug('文本长度小于预设值{}，被抛弃:\n{}\n{}\n{}'.format(self.min_text_length, '-'*40,
                                                                       self.c_texts[self.c_texts_length.index(max(
                                                                           self.c_texts_length))], '-' * 40))
             return None
-
         '''函数分布图的最高点'''
         self.loggings.debug('max(c_text_length) = %s' % max(self.c_texts_length))
         max_block = max(self.c_blocks)
@@ -625,9 +628,8 @@ class ExtractText(FeaturesList):
         point > N，通常这个最小值是0（空行就是0），增大N将会过滤掉长度小于N的行
         '''
         self.N = min(self.c_blocks)
-        while self.start >= 0 and self.c_blocks[self.start] > self.N:
+        while self.start > 0 and self.c_blocks[self.start] > self.N:
             self.start -= 1
-
         while self.end < len(self.c_blocks) - 1 and self.c_blocks[self.end] > self.N:
             self.end += 1
         self._text = '\n'.join(self.c_texts[self.start + self.blocks_size: self.end])
@@ -637,8 +639,10 @@ class ExtractText(FeaturesList):
         '''尝试再次获取有效文本，针对有多段有效文本的情况'''
 
         if self.recursion is False and self.direction_status is False:          # 第一次分析 获得本次字符串长度
+            if len(self._text) < default_args['min_text_length']:
+                return None
             self.section = len(self._text)
-            # self.x = 1
+
         else:                                                                   # 非第一次的操作
             self.x += 1
             d = False
@@ -648,7 +652,6 @@ class ExtractText(FeaturesList):
                     self.loggings.debug('本次分析达不到预定义的要求(大于最长段落的1/{0})，若本段为所需要的请增大"-{4}"值，抛弃内容如下:'
                                         '\n{1}\n{2}\n{3}'.format(parameter, '-' * 100, text, '-' * 100, t))
                     return True
-
             if self.args.direction:
                 d = detection_text_length(self._text, self.args.pv, 'pv')
             elif self.loop:
@@ -670,7 +673,6 @@ class ExtractText(FeaturesList):
             self.loggings.debug('第%s次分析开始' % (self.x + 1))
             self.recursion = True
             self.blocks_process()
-
         return self.store_text
 
     def del_invalid_text(self):
@@ -798,7 +800,7 @@ class ExtractText(FeaturesList):
         else:
             # 从目录页面提取所有章节URL
             links, page_count, domain = self.extract_contents_url(self.args.c, retry=self.args.retry)
-            # 记录文件名
+            # 开始多线程之前记录文件名 确保顺序的正确
             [saved_filename.append('{0:<{1}} {2}.txt'.format(x[-1], len(str(len(links))), x[0])) for x in links]
             # self.single_process(link_list=links, page_count=page_count)
             mu_th(links, page_count)
@@ -827,16 +829,16 @@ class ExtractText(FeaturesList):
         """
         :param link_list:   页面URL总列表
         """
-        self.recursion = False                       # 单url重复抓取标记
+        self.recursion = False                       # 单url重复抓取标记包括翻页
         self.direction_status = False                # 翻页成功标记
-        self.x = 1
         count = 0
 
         while link_list:
             pop = link_list.pop(0)  # 提取一条链接并从原始列表删除
             title = pop[0]      # title
-            link  = pop[1]       # link
+            link  = pop[1]      # link
             count = pop[2]      # id
+            self.x = 1          # 单url分析次数
             try:
                 page_text, title, direction_url = self.extract_text(link, title, count)
             except BaseException as err:
@@ -856,7 +858,7 @@ class ExtractText(FeaturesList):
                     if not direction_url and self.args.s and len(text_cache) == 0:
                         self.Error_url.append(msg)
                     elif self.args.c:
-                        self.loggings.error('读取数据为空 可能遇到了VIP章节或是其他异常')
+                        self.loggings.error('读取数据为空 可能遇到了VIP章节或是不支持的站点')
                         break
                 else:  # 内容非空
                     wr = self.write_text(count, title, page_text, page_count)                       # 写入文件
@@ -1018,15 +1020,17 @@ def args_parser():
     parse_url_group.add_argument('-s', metavar='single url', nargs=1, type=str,
                                  help='文本页URL, 抓取单一url的文本内容')
     ''''''
-    parse.add_argument('-pn', dest='direction', choices=['up', 'down'], default=default_args['pn'], help='尝试向前或向后翻页')
-    parse.add_argument('-pv', nargs='?', type=int, choices=range(2, 6), default=default_args['pv'], help='翻页参数，不同页的有效内容最大相差比')
+    parse.add_argument('-pn', nargs='?', dest='direction', choices=['up', 'down'], const='down', default=default_args['pn'],
+                       help='尝试向前或向后翻页, 不指定方向时默认向后翻页')
+    parse.add_argument('-pv', nargs='?', type=int, choices=range(2, 7), default=default_args['pv'],
+                       help='翻页参数，不同页段落的有效内容最大相差比')
     parse.add_argument('-r', nargs=1, dest='retry', type=int, choices=range(0, 8), default=[default_args['r']], help='最大请求失败重试次数')
     parse.add_argument('-m', type=int, choices=range(1, 6), default=default_args['m'], help='多线程倍数, N = m x cpu')
     parse.add_argument('-debug', nargs=1, type=int, choices=range(0, 4), default=[default_args['debug']],
                        help='debug功能，0关闭，1输出到控制台，2输出到文件，3同时输出')
 
     switch_group = parse.add_argument_group(title='高级选项', description='针对不同的情况调整策略以获得最佳效果, 参数只需要输入开头即可')
-    switch_group.add_argument('-b', dest='block_size', type=int, choices=range(2, 12), default=default_args['block_size'],
+    switch_group.add_argument('-b', dest='block_size', type=int, choices=range(2, 11), default=default_args['block_size'],
                               help='文本行块分布函数块大小，值越小筛选越严格，获得的内容可能越少，适用于正文密集度高，反之同理')
     switch_group.add_argument('--drawing', action='store_const', const=True, default=default_args['drawing'],
                               help='绘制文本分布函数图，图形化上一个选项的文本块分布函数，可调整不同值做对比，仅在文本页-s模式有效')
@@ -1036,15 +1040,17 @@ def args_parser():
                               help='保留正文中的图片链接，默认删除')
     switch_group.add_argument('--ad', dest='ad_rem', action='store_const', const=False, default=default_args['ad'],
                               help='保留页面的广告及推广信息，默认为删除广告减少干扰')
-    switch_group.add_argument('-loop', nargs='?', type=int, choices=range(2, 6), const=2, default=default_args['loop'],
-                              help='启用循环过滤，对页面进行多次筛选，适合有多段落的情况，预设值为不小于首段文本长度的1/2')
+    switch_group.add_argument('-loop', nargs='?', type=int, choices=range(2, 7), const=2, default=default_args['loop'],
+                              help='启用循环过滤，对一个页面进行多次筛选，适合有多段落的情况，预设值为不小于最长段落文本长度的1/2, '
+                                   '开启pn时会被pv参数所覆盖')
     switch_group.add_argument('-email', metavar='xx@abc.com', nargs='?', const=default_args['email_to_address'],
                               default=default_args['email'], help='将获取的正文以邮件附件的形式发送到收件人, 不输入邮件地址发送到预设邮箱 %(const)s')
     switch_group.add_argument('-dest', choices=['file', 'terminal', 'all'], default=default_args['dest'],
-                              help='将内容输出到指定目标 %(choices)s，输出到终端时-c模式不能同时发送邮件')
+                              help='将结果输出到指定目标 %(choices)s')
 
     parse.add_argument('--version', action='version', version='%(prog)s 1.0.2', help='显示版本号')
-    ide_debug = '-s http://tieba.baidu.com/p/4835763412 -pn down -loo -dest terminal'.split()
+    ide_debug = '-s http://tieba.baidu.com/p/4103923521?pn=1  -loo --blank -pv 4'.split()
+    ide_debug = '-s http://diy.pconline.com.cn/851/8515185_5.html -pn -pv 6'.split()
     ide_debug = None                        # 方便开启关闭在ide里模拟参数输入debug
     args_ = parse.parse_args(ide_debug)
     args_.debug = args_.debug[0]

@@ -308,9 +308,13 @@ headers = {'User-Agent':
                    ' AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
                }
 
-r = requests.get('http://www.osx86.net/files/category/3-bootloaders/?page=4', headers=headers)
+r = requests.get('http://chuangshi.qq.com/bk/ls/AGoENV1mVjQAP1Rk-r-550.html', headers=headers)
+
+
 
 htmlbs = BeautifulSoup(r.content, 'html5lib')
+p = htmlbs.find(id='chaptercontainer')
+p2 = p.contents
 
 up = htmlbs.find('a', string=re.compile(r'上一|[nN][eE]?[xX][tT]|&lt'))
 up2 = htmlbs.find('a', class_=re.compile(r'[pP][rR]?[eE][vV]'))
