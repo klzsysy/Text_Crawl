@@ -56,8 +56,8 @@ default_args = {
     'email': False,                                     # 将结果发送邮件发送
     'email_to_address':     'sonny_yang@kindle.cn',     # 默认邮件收件人，可多人 用;分割
     'email_server':         'smtp.xxx.com.cn',          # smtp服务器
-    'email_from_address':   'it_xxx@xx.com.cn',         # 发件账户
-    'email_from_password':  'xxx.xx',                   # 发件账户密码
+    'email_from_address':   'xxxxx@xxx.com.cn',         # 发件账户
+    'email_from_password':  'xxxx.x',                   # 发件账户密码
     'email_title':          'Convert'                   # 邮件title
 }
 
@@ -337,7 +337,7 @@ class FeaturesList(object):
     def next_page(self, htmlbs, direction=None):
         url = None
         if direction == 'up':
-            up1 = htmlbs.find('a', string=re.compile(r'上一|[nN][eE]?[xX][tT]|&lt'))
+            up1 = htmlbs.find('a', string=re.compile(r'上一|[pP][rR]?[eE][vV]|&lt'))
             up2 = htmlbs.find('a', class_=re.compile(r'[pP][rR]?[eE][vV]'))
             if up1:
                 url = up1.get('href')
@@ -351,8 +351,9 @@ class FeaturesList(object):
                 url = down1.get('href')
             elif down2:
                 url = down2.get('href')
-        if 'javascript' not in url:
-            return url
+        if url:
+            if 'javascript' not in url:
+                return url
 
     class GetPageLinks(object):
         """
@@ -371,7 +372,6 @@ class FeaturesList(object):
 
             self.contentbs = BeautifulSoup(str(self.content), 'html5lib')
             self.urllist = self.contentbs.find_all('a')
-
 
         def special_treatment(self, raw):
             """
@@ -875,7 +875,7 @@ class ExtractText(FeaturesList):
 
         if (self.args.email or not self.args.dest == 'file') and len(text_cache) > 0:               # 发送邮件与终端输出
                 cache = self.textcache_merge(text_cache, make=True)
-                if not self.args.dest == 'file':  # 控制台输出
+                if not self.args.dest == 'file':                                                     # 控制台输出
                     self.output_text_terminal(cache)
                 if self.args.email:
                     email = send_email(text=cache, title=self.origin_url_title, to_addr=self.args.email,
@@ -992,8 +992,7 @@ class send_email(FeaturesList):
             server.sendmail(self.from_addr, self.to_addr, self.msg.as_string())
             server.close()
         except smtplib.SMTPAuthenticationError as err:
-            self.loggings.debug("登录到smtp服务器失败！")
-            raise err
+            self.loggings.debug("登录到smtp服务器失败, 无法发送邮件")
         except Exception as err:
             self.loggings.error('邮件发送失败\nError:\n' + str(err) + '\n\nHeader:\n' + self.msg.as_string())
         else:
@@ -1001,12 +1000,6 @@ class send_email(FeaturesList):
 
     def send(self):
         self.__sendmail()
-
-# class UrlAction(argparse.Action):
-#     def __call__(self, parser, namespace, values, option_string=None):
-#         global html_url
-#         html_url = values[0]
-#         setattr(namespace, self.dest, values)
 
 
 def args_parser():
@@ -1050,7 +1043,7 @@ def args_parser():
 
     parse.add_argument('--version', action='version', version='%(prog)s 1.0.2', help='显示版本号')
     ide_debug = '-s http://tieba.baidu.com/p/4103923521?pn=1  -loo --blank -pv 4'.split()
-    ide_debug = '-s http://diy.pconline.com.cn/851/8515185_5.html -pn -pv 6'.split()
+    ide_debug = '-s http://tieba.baidu.com/p/4103923521?pn=15 -pn -loo --blank'.split()
     ide_debug = None                        # 方便开启关闭在ide里模拟参数输入debug
     args_ = parse.parse_args(ide_debug)
     args_.debug = args_.debug[0]
