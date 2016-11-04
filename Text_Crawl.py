@@ -40,7 +40,7 @@ else:
 """
 default_args = {
     'pn': False,                                    # 开启尝试翻页
-    'pv': 3,                                        # 翻页时不同长度段落的有效比例1/pv, 即最短文本不小于最长文本的pv倍
+    'pv': 2,                                        # 翻页时不同长度段落的有效比例1/pv, 即最短文本不小于平均文本的pv倍
     'r': 3,                                         # 最大失败重试次数
     'debug': 3,                                     # 0关闭，1输出到控制台，2输出到文件，3同时输出
     'block_size': 5,                                # 文本行块分布函数块大小
@@ -50,14 +50,14 @@ default_args = {
     'ad': True,                                     # 删除可能的广告，默认删除
     'loop': False,                                  # 对页面进行多次筛选 适合有多段文本，默认关闭
     'dest': 'file',                                 # 结果输出位置
-    'min_text_length': 100,                         # 页面最长文本段落的最小长度 小于这个值的将直接丢弃
+    'min_text_length': 120,                         # 页面最长文本段落的最小长度 小于这个值的将直接丢弃
     'm': 2,                                         # 多线程数量  m x cpu
     # 邮件相关配置
     'email': False,                                     # 将结果发送邮件发送
     'email_to_address':     'sonny_yang@kindle.cn',     # 默认邮件收件人，可多人 用;分割
     'email_server':         'smtp.xxx.com.cn',          # smtp服务器
-    'email_from_address':   'xxxxx@xxx.com.cn',         # 发件账户
-    'email_from_password':  'xxxx.x',                   # 发件账户密码
+    'email_from_address':   'xxxx@xxxx.com.cn',         # 发件账户
+    'email_from_password':  'xx.xxx',                   # 发件账户密码
     'email_title':          'Convert'                   # 邮件title
 }
 
@@ -578,6 +578,7 @@ class ExtractText(FeaturesList):
         self.leave_blank = args.leave_blank
         self.drawing = args.drawing
         self.loop = args.loop
+        self.paragraph_len = []
         # loggings.debug('blocks_size={0};save_image={1};leave_blank={2};drawing={3}loop={4}'.format(self.blocks_size,
         #                 self.save_image, self.leave_blank, self.drawing, self.loop))
         if self.drawing:
@@ -614,7 +615,7 @@ class ExtractText(FeaturesList):
             self.c_blocks.append(sum([len(y) for y in self.c_texts[x:x + self.blocks_size]]))
         self.loggings.debug('len(c_blocks) = %s' % len(self.c_blocks))
         # 首次过滤最长的文本段没有达到预定义的长度 则视为太短抛弃
-        if max(self.c_texts_length) <= self.min_text_length and not self.recursion:
+        if max(self.c_texts_length) <= self.min_text_length and not self.analyzed_again:
             self.loggings.debug('文本长度小于预设值{}，被抛弃:\n{}\n{}\n{}'.format(self.min_text_length, '-'*40,
                                                                       self.c_texts[self.c_texts_length.index(max(
                                                                           self.c_texts_length))], '-' * 40))
@@ -638,19 +639,23 @@ class ExtractText(FeaturesList):
         self.loggings.debug('blocks:{} blocks_start:{}  blocks_end:{}'.format(len(self.c_blocks), self.start, self.end))
         '''尝试再次获取有效文本，针对有多段有效文本的情况'''
 
-        if self.recursion is False and self.direction_status is False:          # 第一次分析 获得本次字符串长度
-            if len(self._text) < default_args['min_text_length']:
+        if not self.leave_blank:                                    # 删除空行
+            self._text = re.sub(self.rebr, '\n', self._text)
+
+        if self.analyzed_again is False and self.get_next_page is False:     # 第一次分析 获得本次字符串长度
+            if len(self._text) < default_args['min_text_length']:               # 太短直接丢弃
                 return None
-            self.section = len(self._text)
+            self.section = len(self._text)                                      # 第一次设定有效长度标尺
 
         else:                                                                   # 非第一次的操作
-            self.x += 1
+            self.x += 1                                                          # 页面分析次数+1
+            self.loggings.debug('第%s次再分析完成，本次文本段落长度标尺 %s' % (self.x, self.section))
             d = False
 
             def detection_text_length(text, parameter, t=''):
                 if len(text) < int(self.section / parameter):                   # 本次字符串长度小于第一次的一半则忽略
-                    self.loggings.debug('本次分析达不到预定义的要求(大于最长段落的1/{0})，若本段为所需要的请增大"-{4}"值，抛弃内容如下:'
-                                        '\n{1}\n{2}\n{3}'.format(parameter, '-' * 100, text, '-' * 100, t))
+                    self.loggings.debug('第{5}次分析({6})达不到预定义的要求(大于平均段落长度的1/{0})，若本段为所需要的请增大"-{4}"值，抛弃内容如下:'
+                                        '\n{1}\n{2}\n{3}'.format(parameter, '-' * 100, text, '-' * 100, t, self.x, len(text)))
                     return True
             if self.args.direction:
                 d = detection_text_length(self._text, self.args.pv, 'pv')
@@ -659,20 +664,23 @@ class ExtractText(FeaturesList):
             if d:
                 return None
 
-        if not self.leave_blank:                                    # 删除空行
-            self._text = re.sub(self.rebr, '\n', self._text)
+        self.loggings.debug('第%s次获得有效长度 %s' % (self.x, len(self._text)))
+        self.loggings.debug(('内容概要: %s...' % self._text[:40]))
 
-        self.loggings.debug('第%s次再分析完成' % self.x)
-        self.loggings.debug('有效标尺 %s' % self.section)
-        self.loggings.debug('本次获得有效长度 %s' % len(self._text))
         self.store_text.append([self.start, self._text])            # 收集有效的段落
         # 删除已提取的段落
         self.c_texts = self.c_texts[:self.start + self.blocks_size] + self.c_texts[self.end:]
+
         # 开始递归操作,查找符合调节的第二段文本
         if self.loop:
+            self.paragraph_len.append(len(self._text))
+            self.section = sum(self.paragraph_len) // len(self.paragraph_len)
+            self.loggings.debug('更新文本段落长度标尺为 {0}'.format(self.section))
+
             self.loggings.debug('第%s次分析开始' % (self.x + 1))
-            self.recursion = True
+            self.analyzed_again = True
             self.blocks_process()
+
         return self.store_text
 
     def del_invalid_text(self):
@@ -720,6 +728,7 @@ class ExtractText(FeaturesList):
 
         if self.text is None:
             return None
+
         # 排序并组合二维列表为字符串
         self.finally_text = '\n\n# -----\n\n'.join(y[1] for y in sorted(self.text, key=lambda x: x[0]))
         self.store_text = []
@@ -738,7 +747,8 @@ class ExtractText(FeaturesList):
         ad_list.append(self.page_soup.find_all('div', 'weixin'))
         ad_list.append(self.page_soup.find_all('a', string=re.compile('纠错')))
         ad_list.append(self.page_soup.find_all('div', class_=re.compile
-        ('region_bright|region_bright my_app|novel-ranking-frs-body|topic_list_box|region-login')))
+        ('region_bright|region_bright my_app|novel-ranking-frs-body|topic_list_box|region-login|'
+         'card_top_wrap clearfix card_top_theme2 ')))
         ad_list.append(self.page_soup.find_all('li', class_=re.compile('l_badge')))
         for ad in ad_list:
             for x in ad:
@@ -760,7 +770,7 @@ class ExtractText(FeaturesList):
         get_page_title = self.page_soup.title.get_text()
         if page_title == '' or self.args.direction:
             page_title = get_page_title
-            if self.direction_status is False:
+            if self.get_next_page is False:
                 self.loggings.debug('获取原始页title %s' % page_title)
                 self.origin_url_title = page_title
 
@@ -829,8 +839,8 @@ class ExtractText(FeaturesList):
         """
         :param link_list:   页面URL总列表
         """
-        self.recursion = False                       # 单url重复抓取标记包括翻页
-        self.direction_status = False                # 翻页成功标记
+        self.analyzed_again = False               # 单url重复抓取标记包括翻页
+        self.get_next_page = False                # 翻页成功标记
         count = 0
 
         while link_list:
@@ -849,7 +859,7 @@ class ExtractText(FeaturesList):
                 if self.args.direction and direction_url:                   # 成功获得下一页url
                     link_list.append([title, direction_url, count + 1])
                     self.loggings.debug('找到下一页 %s' % direction_url)
-                    self.direction_status = True
+                    self.get_next_page = True
 
                 if page_text is None:  # 内容内空
                     msg = '%s %s \nNo valid text to extract, possibly invalid pages, ' \
@@ -870,7 +880,7 @@ class ExtractText(FeaturesList):
             self.Draw.put(None)  # 确保绘图子进程结束后主线程可以退出
             self.loggings.debug('多进程绘图进程已结束')
 
-        if self.direction_status and not self.args.dest == 'terminal':                              # 翻页成功 合并文件
+        if self.get_next_page and not self.args.dest == 'terminal':                              # 翻页成功 合并文件
             self.text_merge(os.path.abspath('.'), merge_name=self.origin_url_title, make=self.args.direction)
 
         if (self.args.email or not self.args.dest == 'file') and len(text_cache) > 0:               # 发送邮件与终端输出
@@ -1015,8 +1025,8 @@ def args_parser():
     ''''''
     parse.add_argument('-pn', nargs='?', dest='direction', choices=['up', 'down'], const='down', default=default_args['pn'],
                        help='尝试向前或向后翻页, 不指定方向时默认向后翻页')
-    parse.add_argument('-pv', nargs='?', type=int, choices=range(2, 7), default=default_args['pv'],
-                       help='翻页参数，不同页段落的有效内容最大相差比')
+    parse.add_argument('-pv', nargs='?', type=int, choices=range(2, 11), default=default_args['pv'],
+                       help='翻页参数，丢弃小于段落平均长度1/pv的内容')
     parse.add_argument('-r', nargs=1, dest='retry', type=int, choices=range(0, 8), default=[default_args['r']], help='最大请求失败重试次数')
     parse.add_argument('-m', type=int, choices=range(1, 6), default=default_args['m'], help='多线程倍数, N = m x cpu')
     parse.add_argument('-debug', nargs=1, type=int, choices=range(0, 4), default=[default_args['debug']],
@@ -1034,7 +1044,7 @@ def args_parser():
     switch_group.add_argument('--ad', dest='ad_rem', action='store_const', const=False, default=default_args['ad'],
                               help='保留页面的广告及推广信息，默认为删除广告减少干扰')
     switch_group.add_argument('-loop', nargs='?', type=int, choices=range(2, 7), const=2, default=default_args['loop'],
-                              help='启用循环过滤，对一个页面进行多次筛选，适合有多段落的情况，预设值为不小于最长段落文本长度的1/2, '
+                              help='启用循环过滤，对一个页面进行多次筛选，适合有多段落的情况，预设值为不小于平均段落文本长度的1/2, '
                                    '开启pn时会被pv参数所覆盖')
     switch_group.add_argument('-email', metavar='xx@abc.com', nargs='?', const=default_args['email_to_address'],
                               default=default_args['email'], help='将获取的正文以邮件附件的形式发送到收件人, 不输入邮件地址发送到预设邮箱 %(const)s')
@@ -1043,7 +1053,7 @@ def args_parser():
 
     parse.add_argument('--version', action='version', version='%(prog)s 1.0.2', help='显示版本号')
     ide_debug = '-s http://tieba.baidu.com/p/4103923521?pn=1  -loo --blank -pv 4'.split()
-    ide_debug = '-s http://tieba.baidu.com/p/4103923521?pn=15 -pn -loo --blank'.split()
+    ide_debug = '-s http://tieba.baidu.com/p/4103923521 -loo -pn -pv 5 --blank'.split()
     ide_debug = None                        # 方便开启关闭在ide里模拟参数输入debug
     args_ = parse.parse_args(ide_debug)
     args_.debug = args_.debug[0]
