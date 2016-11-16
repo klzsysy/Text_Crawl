@@ -54,10 +54,10 @@ default_args = {
     'm': 2,                                         # 多线程数量  m x cpu
     # 邮件相关配置
     'email': False,                                     # 将结果发送邮件发送
-    'email_to_address':     'sonny_yang@kindle.cn',     # 默认邮件收件人，可多人 用;分割
-    'email_server':         'smtp.xxx.com.cn',          # smtp服务器
+    'email_to_address':     'xxxxxxxxxx@kindle.cn',     # 默认邮件收件人，可多人 用;分割
+    'email_server':         'xxx.xxxx.com.cn',          # smtp服务器
     'email_from_address':   'xxxx@xxxx.com.cn',         # 发件账户
-    'email_from_password':  'xx.xxx',                   # 发件账户密码
+    'email_from_password':  'xxx.xx',                   # 发件账户密码
     'email_title':          'Convert'                   # 邮件title
 }
 
@@ -67,10 +67,10 @@ text_cache = []
 
 
 class FeaturesList(object):
-    def __init__(self, args):
+    def __init__(self, aargs):
         self.loggings = logging.getLogger('log')
         self.down_path = 'down_text'
-        self.args = args
+        self.args = aargs
         self.Error_url = ['']
         self.Unable_write = ['']
         self.headers = {'User-Agent':
@@ -78,7 +78,8 @@ class FeaturesList(object):
                             ' AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
                         }
 
-    def init_logs(self, logs, lev=1):
+    @staticmethod
+    def init_logs(logs, lev=1):
         """
         记录日志，输出到控制台和文件
         """
@@ -207,7 +208,8 @@ class FeaturesList(object):
             soup = BeautifulSoup(content, 'html5lib')
             return soup, protocol, domain, rest, status_code, r_cookies
 
-    def url_merge(self, page_url, raw_url, protocol):
+    @staticmethod
+    def url_merge(page_url, raw_url, protocol):
         """
         :param page_url: 当前页URL
         :param raw_url: 采集到的URL
@@ -310,7 +312,8 @@ class FeaturesList(object):
                     return lp * self.common_used_numerals.get(i, 0) + rp
             return self.common_used_numerals.get(s[-1], 0)
 
-    def output_text_terminal(self, text=''):
+    @staticmethod
+    def output_text_terminal(text=''):
         platform = sys.platform
         code = locale.getdefaultlocale()[1]
         code_dict = {
@@ -321,12 +324,12 @@ class FeaturesList(object):
             'cp936': 'gbk'}
         try:
             terminal_size = os.get_terminal_size().columns - 1
-        except BaseException:
+        except Exception:
             terminal_size = 70
         if platform == 'win32':
             try:
                 text = text.encode(encoding=code_dict[code], errors='ignore').decode(encoding=code_dict[code])
-            except UnicodeEncodeError as err:
+            except UnicodeEncodeError:
                 pass
         text_format = '\n{0}\n{2}\n{0}\n{1}\n{0}\n{3}\n{0}'.format(terminal_size * '-', text,
                                                                    '|' * ((terminal_size // 2) - 5)
@@ -334,7 +337,8 @@ class FeaturesList(object):
                                                                    terminal_size * '|')
         print(text_format)
 
-    def next_page(self, htmlbs, direction=None):
+    @staticmethod
+    def next_page(htmlbs, direction=None):
         url = None
         if direction == 'up':
             up1 = htmlbs.find('a', string=re.compile(r'上一|[pP][rR]?[eE][vV]|&lt'))
@@ -954,7 +958,7 @@ class draw_processing():
 
 
 class send_email(FeaturesList):
-    def __init__(self, text='', title='', to_addr=default_args['email_to_address'] , url=''):
+    def __init__(self, text='', title='', to_addr=default_args['email_to_address'], url=''):
         FeaturesList.__init__(self, args)
         # 发件人
         self.from_addr = default_args['email_from_address']
@@ -971,7 +975,8 @@ class send_email(FeaturesList):
         i.write(text.encode('utf-8'))
         self.mail_text = i.getvalue()
 
-    def __format_addr(self, s):
+    @staticmethod
+    def __format_addr(s):
         name, addr = parseaddr(s)
         return formataddr((Header(name, 'utf-8').encode(), addr))
 
@@ -1070,7 +1075,7 @@ def args_parser():
 
 if __name__ == '__main__':
     args = args_parser()
-    public = FeaturesList(args=args)
+    public = FeaturesList(aargs=args)
     public.init_logs(public.loggings, args.debug)
     Ext = ExtractText()
     Ext.start_work()
