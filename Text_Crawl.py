@@ -78,6 +78,7 @@ class FeaturesList(object):
                             'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
                             ' AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
                         }
+        self.sort_failed = False
 
     @staticmethod
     def init_logs(logs, lev=1, levels='DEBUG'):
@@ -274,7 +275,8 @@ class FeaturesList(object):
             filename_format = '.\{0}\{1:<{2}} {3}.txt'.format(self.down_path, str(count), len(str(page_count)), title)
 
         saved_filename.append(filename_format.split('\\')[-1])                      # 记录文件名
-        if self.args.s:                                                             # 单页模式缓存文本内容 #并记录文件名
+        if self.args.s:
+            # 单页模式缓存文本内容 #并记录文件名
             # saved_filename.append(filename_format.split('\\')[-1])
             text_cache.append([text, count-999])
 
@@ -453,12 +455,28 @@ class FeaturesList(object):
                                  'Possible links are incorrect or not supported by script'.format(self.rest.strip('/')))
             return page_rul
 
+    def match_chinese(self, s):
+        try:
+            re_s = re.match('[第卷]?\s*([零一二三四五六七八九十百千万亿]+)', s).group(1)
+        except AttributeError:
+            try:
+                re_s = int(re.match('[第卷]?\s*([0123456789]+[^.-])', s).group(1))
+            except Exception:
+                self.loggings.warning('无法识别顺序的页面标题：%s' % s)
+                re_s = '零'
+                self.sort_failed = True
+        except TypeError:
+            return s
+        return re_s
+
     def extract_contents_url(self, ori_url, retry=0):
         """
         提取目录页的有效URL，抓取网站title
         :param ori_url: 目录页URL
         :return:        提取的章节URL 列表
         """
+
+
         self.loggings.debug('Open original url %s' % ori_url)
         try:
             soup_text, protocol, ori_domain, rest, code, ori_cookie = self.get_url_to_bs(ori_url, re_count=retry)
@@ -480,21 +498,8 @@ class FeaturesList(object):
                 self.loggings.info('已通过qidian专用配置获得所有url')
                 return all_page_links, len(all_page_links), ori_domain               # 已经单独进行了处理
 
-            def match_chinese(s):
-                try:
-                    re_s = re.match('[第卷]?\s*([零一二三四五六七八九十百千万亿]+)', s).group(1)
-                except AttributeError:
-                    try:
-                        re_s = int(re.match('[第卷]?\s*([0123456789]+[^.-])', s).group(1))
-                    except Exception:
-                        self.loggings.warning('无法识别的页面标题：%s' % s)
-                        re_s = '零'
-                except TypeError:
-                    return s
-                return re_s
-
             self.loggings.info('Try to get the Chinese value for each title')
-            contents = list(map(match_chinese, [x[0] for x in all_page_links]))
+            contents = list(map(self.match_chinese, [x[0] for x in all_page_links]))
 
             self.loggings.info('make variable chinese_str duplicate')
             '''初始化中文数字转 int'''
@@ -515,7 +520,10 @@ class FeaturesList(object):
 
             if len(all_page_links) == len(contents):
                 for x in range(len(all_page_links)):
-                    if orderly:  # 无序 使用实际序号
+                    if self.sort_failed:
+                        # 无法转换识别章节名 直接使用原始顺序
+                        all_page_links[x].append(x)
+                    elif orderly:  # 无序 使用实际序号
                         all_page_links[x].append(contents[x])
                     else:
                         all_page_links[x].append(x + 1)  # 有序 直接添加序号
@@ -623,7 +631,7 @@ class ExtractText(FeaturesList):
         self.loggings.debug('blocks_size={0};save_image={1};leave_blank={2};drawing={3}loop={4}'.format(self.blocks_size,
                         self.save_image, self.leave_blank, self.drawing, self.loop))
         if self.drawing:
-            self.Draw = draw_processing()
+            self.Draw = Draw_processing()
 
     def tags_process(self):
         self.body = re.sub(self.reCOMM, "", self.body)
@@ -854,15 +862,21 @@ class ExtractText(FeaturesList):
         else:
             # 从目录页面提取所有章节URL
             links, page_count, domain = self.extract_contents_url(self.args.c, retry=self.args.retry)
-            # 开始多线程之前记录文件名 确保顺序的正确
+
+            # 开始多线程之前记录文件名 确保顺序的正确 不过要处理可能实际未能成功抓取的问题
             # [saved_filename.append('{0:<{1}} {2}.txt'.format(x[-1], len(str(len(links))), x[0])) for x in links]
+
+            """单线程 调试用"""
             # self.single_process(link_list=links, page_count=page_count)
+
+            # 多线程
             mu_th(links, page_count)
+
             if not self.args.dest == 'terminal':
                 self.text_merge(os.path.abspath('.'), merge_name=self.origin_url_title)  # 合并文本
                 if self.args.email:
                     with open(self.origin_url_title_file, 'r') as f:
-                            email = send_email(text=f.read(), title=self.origin_url_title, to_addr=self.args.email, url=args.c)
+                            email = Sendemail(text=f.read(), title=self.origin_url_title, to_addr=self.args.email, url=args.c)
                             email.send()
 
         if len(self.Unable_write) == 1 and len(self.Error_url) == 1:
@@ -931,7 +945,7 @@ class ExtractText(FeaturesList):
                 if not self.args.dest == 'file':                                                     # 控制台输出
                     self.output_text_terminal(cache)
                 if self.args.email:
-                    email = send_email(text=cache, title=self.origin_url_title, to_addr=self.args.email,
+                    email = Sendemail(text=cache, title=self.origin_url_title, to_addr=self.args.email,
                                        url=[x for x in [self.args.c, self.args.s] if x][0])         # 原始URL
                     email.send()
 
@@ -957,7 +971,7 @@ def mu_th(links, page):
     public.loggings.info('Multi-threaded processing is complete! ')
 
 
-class draw_processing():
+class Draw_processing(object):
     """
     多进程模式画出字块分布函数图
     """
@@ -996,7 +1010,7 @@ class draw_processing():
         self.queue.put(sequence)
 
 
-class send_email(FeaturesList):
+class Sendemail(FeaturesList):
     def __init__(self, text='', title='', to_addr=default_args['email_to_address'], url=''):
         FeaturesList.__init__(self, args)
         # 发件人
@@ -1019,7 +1033,7 @@ class send_email(FeaturesList):
         name, addr = parseaddr(s)
         return formataddr((Header(name, 'utf-8').encode(), addr))
 
-    def __sendmail(self):
+    def __send_mail(self):
 
         self.msg = MIMEMultipart()
         self.msg.attach(MIMEText('hi!\n    附件文本来自以下链接\n    %s ' % self.url, 'plain', 'utf-8'))
@@ -1053,7 +1067,7 @@ class send_email(FeaturesList):
             self.loggings.info("邮件已成功发送到%s" % self.to_addr)
 
     def send(self):
-        self.__sendmail()
+        self.__send_mail()
 
 
 def args_parser():
@@ -1096,7 +1110,7 @@ def args_parser():
                               help='将结果输出到指定目标 %(choices)s')
 
     parse.add_argument('--version', action='version', version='%(prog)s 1.0.3', help='显示版本号')
-    # ide_debug = '-c http://www.lewenxiaoshuo.com/books/bangjiaquanrenlei/'.split()
+    # ide_debug = '-c http://www.80txt.com/txtml_20343.html'.split()
     # ide_debug = '-c http://www.piaotian.net/html/7/7929/'.split()
     ide_debug = None                        # 方便开启关闭在ide里模拟参数输入debug
     args_ = parse.parse_args(ide_debug)
