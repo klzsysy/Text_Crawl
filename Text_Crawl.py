@@ -43,7 +43,8 @@ default_args = {
     'pv': 2,                                        # 翻页时不同长度段落的有效比例1/pv, 即最短文本不小于平均文本的pv倍
     'r': 3,                                         # 最大失败重试次数
     'debug': 3,                                     # 0关闭，1输出到控制台，2输出到文件，3同时输出
-    'block_size': 5,                                # 文本行块分布函数块大小
+    'debug_level': 'info',                          # debug级别
+    'block_size': 4,                                # 文本行块分布函数块大小
     'drawing': False,                               # 显示文本块函数，默认不显示
     'leave_blank': True,                            # 保留空格与空行，默认开启
     'image': False,                                 # 保留图片URL 默认关闭
@@ -77,31 +78,42 @@ class FeaturesList(object):
                             'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
                             ' AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
                         }
+        self.sort_failed = False
 
     @staticmethod
-    def init_logs(logs, lev=1):
+    def init_logs(logs, lev=1, levels='DEBUG'):
         """
         记录日志，输出到控制台和文件
         """
+        levels = levels.upper()
+        LEVEL = {
+            'NOTSET': logging.NOTSET,
+            'DEBUG': logging.DEBUG,
+            'INFO': logging.INFO,
+            'WARNING': logging.WARNING,
+            'ERROR': logging.ERROR,
+            'CRITICAL': logging.CRITICAL
+        }
+        level = LEVEL[levels]
         formatstr = logging.Formatter('%(asctime)s - %(levelname)-5s - %(message)s')
         e = False
         if lev is 0:
             return
         if lev is 2 or lev is 3:
-            logs.setLevel(logging.DEBUG)
+            logs.setLevel(level)
             try:
                 out_file = logging.FileHandler(filename='run_logs.log', encoding='utf8')
             except IOError:
                 lev = 1
                 e = True
             else:
-                out_file.setLevel(logging.DEBUG)
+                out_file.setLevel(level)
                 out_file.setFormatter(formatstr)
                 logs.addHandler(out_file)
         if lev is 1 or lev is 3:
-            logs.setLevel(logging.DEBUG)
+            logs.setLevel(level)
             debug_handler = logging.StreamHandler()
-            debug_handler.setLevel(logging.DEBUG)
+            debug_handler.setLevel(level)
             debug_handler.setFormatter(formatstr)
             logs.addHandler(debug_handler)
             if e:
@@ -125,17 +137,19 @@ class FeaturesList(object):
         if os.path.isfile(merge_name):
             os.remove(merge_name)
 
-        self.loggings.debug('Create a merge file')
+        self.loggings.info('Create a merge file')
         text_merge_path = os.path.join(path, self.down_path)
 
         status = True
-        self.loggings.debug('The merged text starts...')
+
+        saved_filename.sort(key=lambda x: int(x.split()[0]))    # 排序文件名
+        self.loggings.info('The merged text starts...')
         with open(os.path.join(path, "fileappend.tmp"), "a", encoding='utf-8') as dest:
             first = False
             for n, filename in enumerate(saved_filename, start=1):
                 try:
                     with open(os.path.join(text_merge_path, filename), encoding='utf-8') as src:
-                        self.loggings.debug('合并 %s' % filename)
+                        self.loggings.info('合并 %s' % filename)
                         if first:
                             if make:
                                 segmentation = '\n\n# {0} 第{1}页{0} \n\n'.format('-' * 12, n)
@@ -144,22 +158,23 @@ class FeaturesList(object):
                             dest.write(segmentation)
                         first = True
                         shutil.copyfileobj(src, dest)
+
                 except FileNotFoundError as err:
                     self.loggings.error(str(err))
-                    self.loggings.debug('合并文件遇到错误，停止.')
+                    self.loggings.warning('未找到要合并文件：' + filename)
                     self.Unable_write.append(str(err))
-                    status = False
-                    break
+                    # status = False
+                    # break
         if status:
             os.rename(os.path.join(path, "fileappend.tmp"), merge_name)
-            self.loggings.debug('Text merged successfully:[%s]' % os.path.join(path, merge_name))
+            self.loggings.info('Text merged successfully:[%s]' % os.path.join(path, merge_name))
         else:
             os.remove(os.path.join(path, "fileappend.tmp"))
 
     def textcache_merge(self, text_list, make=False):
         first = False
         merge_text = ''
-        self.loggings.debug('处理缓存的文本')
+        self.loggings.info('处理缓存的文本')
         for one_page in text_list:
             if first:
                 if make:
@@ -183,7 +198,7 @@ class FeaturesList(object):
             url = 'http://' + url
         try:
             r = requests.get(url, headers=self.headers, timeout=10, allow_redirects=True)
-            # loggings.debug(r.request.headers)
+            self.loggings.debug(r.request.headers)
             r_cookies = r.cookies
             status_code = r.status_code
             content = r.content
@@ -200,7 +215,7 @@ class FeaturesList(object):
             else:
                 return False, None, None, None, None, None
         else:
-            self.loggings.debug('Read Complete [%s]' % url)
+            self.loggings.info('Read Complete [%s]' % url)
             # 获取协议，域名
             protocol, rest = urllib.request.splittype(url)
             domain = urllib.request.splithost(rest)[0]
@@ -250,7 +265,7 @@ class FeaturesList(object):
             return url
 
     def write_text(self, count, title, text, page_count=5):
-        self.try_mkdir(self.down_path)
+
         if text is None or text == '':
             return True
         title = re.sub(r'[/\\:\*\?\"<>\|]', '-', title)                             # 过滤文件名非法字符
@@ -259,16 +274,19 @@ class FeaturesList(object):
         else:
             filename_format = '.\{0}\{1:<{2}} {3}.txt'.format(self.down_path, str(count), len(str(page_count)), title)
 
-        if self.args.s:                                                             # 单页模式缓存文本内容并记录文件名
-            saved_filename.append(filename_format.split('\\')[-1])
+        saved_filename.append(filename_format.split('\\')[-1])                      # 记录文件名
+        if self.args.s:
+            # 单页模式缓存文本内容 #并记录文件名
+            # saved_filename.append(filename_format.split('\\')[-1])
             text_cache.append([text, count-999])
 
         if not self.args.dest == 'terminal':
+            self.loggings.info('write file %s' % title)
             try:
-                self.loggings.debug('Save Page To File: %s' % title)
+                self.loggings.info('Save Page To File: %s' % title)
                 with open(filename_format, 'w', encoding='utf-8') as f:
                     f.write(text)
-                self.loggings.debug('The text was successfully written to the file [%-4s %s]' % (count, title))
+                self.loggings.info('The text was successfully written to the file [%-4s %s]' % (count, title))
             except BaseException as err:
                 return err
             else:
@@ -280,20 +298,32 @@ class FeaturesList(object):
         if not os.path.isdir(path):
             try:
                 os.mkdir(self.down_path)
-                self.loggings.debug("create %s folder" % path)
+                self.loggings.info("create %s folder" % path)
             except BaseException:
                 raise OSError('Failed to create the folder %s' % path)
+        else:
+            if len(os.listdir(path)) > 0:
+                count = 1
+                while True:
+                    try:
+                        os.renames(self.down_path, self.down_path + '_%s' % count)
+                    except FileExistsError:
+                        count += 1
+                    except BaseException:
+                        break
+                    else:
+                        self.try_mkdir(path)
+                        break
 
     class ChineseToDigits(object):
         """
         将中文数字转换为 int整数
         """
-
         def __init__(self):
-            self.common_used_numerals = {u'零': 0, u'一': 1, u'二': 2, u'三': 3, u'四': 4, u'五': 5, u'六': 6, u'七': 7,
-                                         u'八': 8,
-                                         u'九': 9, u'十': 10, u'百': 100,
-                                         u'千': 1000, u'万': 10000, u'亿': 100000000}
+            self.common_used_numerals = {'零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7,
+                                         '八': 8,
+                                         '九': 9, '十': 10, '百': 100,
+                                         '千': 1000, '万': 10000, '亿': 100000000}
 
         def run(self, chars_cn):
             if type(chars_cn) is int:
@@ -301,7 +331,7 @@ class FeaturesList(object):
             s = chars_cn
             if not s:
                 return 0
-            for i in [u'亿', u'万', u'千', u'百', u'十']:
+            for i in ['亿', '万', '千', '百', '十']:
                 if i in s:
                     ps = s.split(i)
                     lp = self.run(ps[0])
@@ -364,15 +394,22 @@ class FeaturesList(object):
         抓取目录也的章节URL
         """
         def __init__(self, all_page_url_soup, rest, protocol):
-
             self.protocol = protocol
             self.soup = all_page_url_soup
             self.rest = rest
-            self.content = self.soup.find_all(id="content")
+            for x in 'content|chapterlist|list'.split('|'):
+                self.content = self.soup.find_all(id=re.compile('%s' % x))
+                if len(self.content) != 0:
+                    break
             if len(self.content) == 0:
-                self.content = self.soup.find_all(id='chapterlist')
+                for x in 'chapterlist|centent|mainbody|catalog.box|volume-wrap|index_area'.split('|'):
+                    self.content = self.soup.find_all('div', re.compile('%s' % x))
+                    if len(self.content) != 0:
+                        break
             if len(self.content) == 0:
-                self.content = self.soup.find_all('div', re.compile('centent|mainbody|catalog.box|volume-wrap|index_area'))
+                self.content = self.soup.find_all('a', href=re.compile("^http:%s|\d+\..{2,4}$" % self.rest))
+            if len(self.content) == 0:
+                raise ValueError("无法正确解析目标Url，可能是无法正确抓取目录列表导致！")
 
             self.contentbs = BeautifulSoup(str(self.content), 'html5lib')
             self.urllist = self.contentbs.find_all('a')
@@ -394,7 +431,9 @@ class FeaturesList(object):
             for index in self.urllist:
                 href_str = index.get('href')
                 title = index.get_text().strip()
-                if re.match('^javascript:[^content]+|/?class|#|%s' % (self.protocol + ':' + self.rest), href_str):
+                # 修改了遇到完整链接被忽略的情况
+                # if re.match('^javascript:[^content]+|/?class|#|%s' % (self.protocol + ':' + self.rest), href_str):
+                if re.match('^javascript:[^content]+|/?class|#', href_str):
                     continue
                 if href_str == '':
                     continue
@@ -416,12 +455,28 @@ class FeaturesList(object):
                                  'Possible links are incorrect or not supported by script'.format(self.rest.strip('/')))
             return page_rul
 
+    def match_chinese(self, s):
+        try:
+            re_s = re.match('[第卷]?\s*([零一二三四五六七八九十百千万亿]+)', s).group(1)
+        except AttributeError:
+            try:
+                re_s = int(re.match('[第卷]?\s*([0123456789]+[^.-])', s).group(1))
+            except Exception:
+                self.loggings.warning('无法识别顺序的页面标题：%s' % s)
+                re_s = '零'
+                self.sort_failed = True
+        except TypeError:
+            return s
+        return re_s
+
     def extract_contents_url(self, ori_url, retry=0):
         """
         提取目录页的有效URL，抓取网站title
         :param ori_url: 目录页URL
         :return:        提取的章节URL 列表
         """
+
+
         self.loggings.debug('Open original url %s' % ori_url)
         try:
             soup_text, protocol, ori_domain, rest, code, ori_cookie = self.get_url_to_bs(ori_url, re_count=retry)
@@ -437,33 +492,20 @@ class FeaturesList(object):
             get_page_links = self.GetPageLinks(soup_text, rest, protocol)
             all_page_links = self.read_qidian(page_soup=soup_text, page_link=ori_url, make='get_page_links')
             if all_page_links is None:
-                self.loggings.debug('开始通过通用方法获得所有url')
+                self.loggings.info('开始通过通用方法获得所有url')
                 all_page_links = get_page_links.get_href(url_merge=self.url_merge)
             else:
-                self.loggings.debug('已通过qidian专用配置获得所有url')
+                self.loggings.info('已通过qidian专用配置获得所有url')
                 return all_page_links, len(all_page_links), ori_domain               # 已经单独进行了处理
 
-            def match_chinese(s):
-                try:
-                    re_s = re.match('[第卷]?\s*([零一二三四五六七八九十百千万亿]+)', s).group(1)
-                except AttributeError:
-                    try:
-                        re_s = int(re.match('[第卷]?\s*([0123456789]+[^.-])', s).group(1))
-                    except Exception:
-                        self.loggings.warning('无法识别的页面标题：%s' % s)
-                        re_s = '零'
-                except TypeError:
-                    return s
-                return re_s
+            self.loggings.info('Try to get the Chinese value for each title')
+            contents = list(map(self.match_chinese, [x[0] for x in all_page_links]))
 
-            self.loggings.debug('Try to get the Chinese value for each title')
-            contents = list(map(match_chinese, [x[0] for x in all_page_links]))
-
-            self.loggings.debug('make variable chinese_str duplicate')
+            self.loggings.info('make variable chinese_str duplicate')
             '''初始化中文数字转 int'''
 
             c2d = self.ChineseToDigits()
-            self.loggings.debug('Began to Analyze the order of the article list...')
+            self.loggings.info('Began to Analyze the order of the article list...')
             contents = list(map(c2d.run, contents))
 
             '''验证目录是否有序'''
@@ -471,26 +513,29 @@ class FeaturesList(object):
             orderly = True
             if re.match('0*?123456789', test_number_str):
                 orderly = False
-                self.loggings.debug('The article list is sorted correctly :)')
+                self.loggings.info('The article list is sorted correctly :)')
             else:
-                self.loggings.debug('Article list sort exception :( Start the collating sequence')
+                self.loggings.info('Article list sort exception :( Start the collating sequence')
             '''将整数化的目录编号加入url title列表'''
 
             if len(all_page_links) == len(contents):
                 for x in range(len(all_page_links)):
-                    if orderly:  # 无序 使用实际序号
+                    if self.sort_failed:
+                        # 无法转换识别章节名 直接使用原始顺序
+                        all_page_links[x].append(x)
+                    elif orderly:  # 无序 使用实际序号
                         all_page_links[x].append(contents[x])
                     else:
                         all_page_links[x].append(x + 1)  # 有序 直接添加序号
 
             else:
-                self.loggings.error('章节序号分析出现错误，填零处理')
+                self.loggings.warning('章节序号分析出现错误，填零处理')
                 [all_page_links[x].append(0) for x in range(len(all_page_links))]
 
             '''目录顺不正常，按照序号count排序'''
             if orderly:
                 all_page_links = sorted(all_page_links, key=lambda x: x[-1])
-            self.loggings.debug('The article list sort is complete')
+            self.loggings.info('The article list sort is complete')
 
             return all_page_links, len(all_page_links), ori_domain
 
@@ -499,7 +544,7 @@ class FeaturesList(object):
         起点中文网专用配置，该网站正文需要二次抓取, 每个章节URL有两种存在形式
         """
         if re.search('qidian\.com|qdmm\.com', page_link):           # 起点站点专用
-            self.loggings.debug('开始通过qidian专用配置读取正文...')
+            self.loggings.info('开始通过qidian专用配置读取正文...')
             if make == 'tow_get_text':
                 page_text = page_soup.find(id='chaptercontent')
                 page_text = page_text.contents[3]
@@ -583,10 +628,10 @@ class ExtractText(FeaturesList):
         self.drawing = args.drawing
         self.loop = args.loop
         self.paragraph_len = []
-        # loggings.debug('blocks_size={0};save_image={1};leave_blank={2};drawing={3}loop={4}'.format(self.blocks_size,
-        #                 self.save_image, self.leave_blank, self.drawing, self.loop))
+        self.loggings.debug('blocks_size={0};save_image={1};leave_blank={2};drawing={3}loop={4}'.format(self.blocks_size,
+                        self.save_image, self.leave_blank, self.drawing, self.loop))
         if self.drawing:
-            self.Draw = draw_processing()
+            self.Draw = Draw_processing()
 
     def tags_process(self):
         self.body = re.sub(self.reCOMM, "", self.body)
@@ -599,7 +644,7 @@ class ExtractText(FeaturesList):
         # 替换空白行为空
         while self.leave_blank:
             self.body, n = re.subn(r'\n +\n', '\n\n', self.body)
-            # loggings.debug('del ... %s' % str(n))
+            self.loggings.debug('del ... %s' % str(n))
             if n == 0:
                 break
 
@@ -757,7 +802,8 @@ class ExtractText(FeaturesList):
         for ad in ad_list:
             for x in ad:
                 _, n = re.subn('\n', '', ' '.join([str(x) for x in x.strings]))
-                if n == 0: n = 1
+                if n == 0:
+                    n = 1
                 x.string = '{}'.format('\n' * n)      # 方法将当前节点用空行替换
 
     def extract_text(self, page_link, page_title, page_id=0):
@@ -767,7 +813,7 @@ class ExtractText(FeaturesList):
         """
         self.id = page_id
         direction_url = None
-        self.loggings.debug('Start Read %s' % page_link + page_title)
+        self.loggings.info('Start Read %s' % page_link + page_title)
         self.page_soup, protocol, _, _, _, _ = self.get_url_to_bs(page_link, re_count=self.args.retry)
 
         # 处理title
@@ -784,7 +830,7 @@ class ExtractText(FeaturesList):
             if direction_url:
                 direction_url = self.url_merge(page_url=page_link, raw_url=direction_url, protocol=protocol)
 
-        self.loggings.debug('Read Complete [%s]' % page_title)
+        self.loggings.info('Read Complete [%s]' % page_title)
 
         if self.args.ad_rem:
             self.delete_ad()        # 去广告干扰
@@ -795,7 +841,7 @@ class ExtractText(FeaturesList):
         if text is None:
             text = self.crawl_context()
 
-        self.loggings.debug('Page text filtering is complete [%s]' % page_title)
+        self.loggings.info('Page text filtering is complete [%s]' % page_title)
 
         if text is None:
             return None, page_title, direction_url
@@ -808,33 +854,40 @@ class ExtractText(FeaturesList):
         """
         启动位置
         """
+        if not self.args.dest == 'terminal':                    # 检测目录
+            self.try_mkdir(self.down_path)
         if not self.args.c:
             page_count = 1
             self.single_process([['', self.args.s, 1000]], page_count)
         else:
             # 从目录页面提取所有章节URL
             links, page_count, domain = self.extract_contents_url(self.args.c, retry=self.args.retry)
-            # 开始多线程之前记录文件名 确保顺序的正确
-            [saved_filename.append('{0:<{1}} {2}.txt'.format(x[-1], len(str(len(links))), x[0])) for x in links]
+
+            # 开始多线程之前记录文件名 确保顺序的正确 不过要处理可能实际未能成功抓取的问题
+            # [saved_filename.append('{0:<{1}} {2}.txt'.format(x[-1], len(str(len(links))), x[0])) for x in links]
+
+            """单线程 调试用"""
             # self.single_process(link_list=links, page_count=page_count)
+
+            # 多线程
             mu_th(links, page_count)
 
             if not self.args.dest == 'terminal':
                 self.text_merge(os.path.abspath('.'), merge_name=self.origin_url_title)  # 合并文本
                 if self.args.email:
                     with open(self.origin_url_title_file, 'r') as f:
-                            email = send_email(text=f.read(), title=self.origin_url_title, to_addr=self.args.email, url=args.c)
+                            email = Sendemail(text=f.read(), title=self.origin_url_title, to_addr=self.args.email, url=args.c)
                             email.send()
 
         if len(self.Unable_write) == 1 and len(self.Error_url) == 1:
-            public.loggings.debug('script complete, Everything OK!')
+            public.loggings.info('script complete, Everything OK!')
             sys.exit(0)
-        public.loggings.debug('script complete, But there are some errors :(')
+        public.loggings.info('script complete, But there are some errors :(')
         try:
             terminal_size = os.get_terminal_size().columns - 1
         except Exception:
             terminal_size = 70
-        public.loggings.info(
+        public.loggings.warning(
             '\n\n{0}\n{1}Error total:\n{2}\n{3}\n{4}'.format('+' * terminal_size, ' ' * int(terminal_size / 2 - 5),
                                                              '# '.join(self.Error_url), '# '.join(self.Unable_write),
                                                              '+' * terminal_size))
@@ -862,7 +915,7 @@ class ExtractText(FeaturesList):
             else:
                 if self.args.direction and direction_url:                   # 成功获得下一页url
                     link_list.append([title, direction_url, count + 1])
-                    self.loggings.debug('找到下一页 %s' % direction_url)
+                    self.loggings.info('找到下一页 %s' % direction_url)
                     self.get_next_page = True
 
                 if page_text is None:  # 内容内空
@@ -872,7 +925,7 @@ class ExtractText(FeaturesList):
                     if not direction_url and self.args.s and len(text_cache) == 0:
                         self.Error_url.append(msg)
                     elif self.args.c:
-                        self.loggings.error('读取数据为空 可能遇到了VIP章节或是不支持的站点')
+                        self.loggings.warning('读取数据为空 可能遇到了VIP章节或是不支持的站点')
                         break
                 else:  # 内容非空
                     wr = self.write_text(count, title, page_text, page_count)                       # 写入文件
@@ -882,7 +935,7 @@ class ExtractText(FeaturesList):
         if self.drawing:
             time.sleep(1)
             self.Draw.put(None)  # 确保绘图子进程结束后主线程可以退出
-            self.loggings.debug('多进程绘图进程已结束')
+            self.loggings.info('多进程绘图进程已结束')
 
         if self.get_next_page and not self.args.dest == 'terminal':                              # 翻页成功 合并文件
             self.text_merge(os.path.abspath('.'), merge_name=self.origin_url_title, make=self.args.direction)
@@ -892,7 +945,7 @@ class ExtractText(FeaturesList):
                 if not self.args.dest == 'file':                                                     # 控制台输出
                     self.output_text_terminal(cache)
                 if self.args.email:
-                    email = send_email(text=cache, title=self.origin_url_title, to_addr=self.args.email,
+                    email = Sendemail(text=cache, title=self.origin_url_title, to_addr=self.args.email,
                                        url=[x for x in [self.args.c, self.args.s] if x][0])         # 原始URL
                     email.send()
 
@@ -908,17 +961,17 @@ def mu_th(links, page):
             ext.single_process(links, page_count=page)
 
     mu_list = []
-    public.loggings.debug('chapter processing starts  ')
+    public.loggings.info('chapter processing starts  ')
     for num in range(os.cpu_count() * args.m):
         m = MuThreading()
         mu_list.append(m)
         m.start()  # 开始线程
     for mu in mu_list:
         mu.join()  # 等待所有线程完成
-    public.loggings.debug('Multi-threaded processing is complete! ')
+    public.loggings.info('Multi-threaded processing is complete! ')
 
 
-class draw_processing():
+class Draw_processing(object):
     """
     多进程模式画出字块分布函数图
     """
@@ -957,7 +1010,7 @@ class draw_processing():
         self.queue.put(sequence)
 
 
-class send_email(FeaturesList):
+class Sendemail(FeaturesList):
     def __init__(self, text='', title='', to_addr=default_args['email_to_address'], url=''):
         FeaturesList.__init__(self, args)
         # 发件人
@@ -980,7 +1033,7 @@ class send_email(FeaturesList):
         name, addr = parseaddr(s)
         return formataddr((Header(name, 'utf-8').encode(), addr))
 
-    def __sendmail(self):
+    def __send_mail(self):
 
         self.msg = MIMEMultipart()
         self.msg.attach(MIMEText('hi!\n    附件文本来自以下链接\n    %s ' % self.url, 'plain', 'utf-8'))
@@ -996,25 +1049,25 @@ class send_email(FeaturesList):
         self.mime.set_payload(self.mail_text)
         encoders.encode_base64(self.mime)
         self.msg.attach(self.mime)
-        self.loggings.debug("构建邮件完成，尝试发送邮件...")
+        self.loggings.info("构建邮件完成，尝试发送邮件...")
         try:
-            self.loggings.debug("开始解析邮件服务器信息")
+            self.loggings.info("开始解析邮件服务器信息")
             server = smtplib.SMTP(self.smtp_server, 25)
             # server.set_debuglevel(1)
-            self.loggings.debug("开始登录到smtp服务器")
+            self.loggings.info("开始登录到smtp服务器")
             server.login(self.from_addr, self.password)
-            self.loggings.debug("登录到SMTP服务器成功开始发送邮件")
+            self.loggings.info("登录到SMTP服务器成功开始发送邮件")
             server.sendmail(self.from_addr, self.to_addr, self.msg.as_string())
             server.close()
         except smtplib.SMTPAuthenticationError as err:
-            self.loggings.debug("登录到smtp服务器失败, 无法发送邮件")
+            self.loggings.error("登录到smtp服务器失败, 无法发送邮件")
         except Exception as err:
             self.loggings.error('邮件发送失败\nError:\n' + str(err) + '\n\nHeader:\n' + self.msg.as_string())
         else:
             self.loggings.info("邮件已成功发送到%s" % self.to_addr)
 
     def send(self):
-        self.__sendmail()
+        self.__send_mail()
 
 
 def args_parser():
@@ -1056,9 +1109,9 @@ def args_parser():
     switch_group.add_argument('-dest', choices=['file', 'terminal', 'all'], default=default_args['dest'],
                               help='将结果输出到指定目标 %(choices)s')
 
-    parse.add_argument('--version', action='version', version='%(prog)s 1.0.2', help='显示版本号')
-    ide_debug = '-s http://tieba.baidu.com/p/4103923521?pn=1  -loo --blank -pv 4'.split()
-    ide_debug = '-s http://tieba.baidu.com/p/4103923521 -loo -pn -pv 5 --blank'.split()
+    parse.add_argument('--version', action='version', version='%(prog)s 1.0.3', help='显示版本号')
+    # ide_debug = '-c http://www.80txt.com/txtml_20343.html'.split()
+    # ide_debug = '-c http://www.piaotian.net/html/7/7929/'.split()
     ide_debug = None                        # 方便开启关闭在ide里模拟参数输入debug
     args_ = parse.parse_args(ide_debug)
     args_.debug = args_.debug[0]
@@ -1069,13 +1122,13 @@ def args_parser():
         args_.c = args_.c[0]
     elif args_.s:
         args_.s = args_.s[0]
-    print(args_)
+    # print(args_)
     return args_
 
 
 if __name__ == '__main__':
     args = args_parser()
     public = FeaturesList(aargs=args)
-    public.init_logs(public.loggings, args.debug)
+    public.init_logs(public.loggings, args.debug, default_args['debug_level'])
     Ext = ExtractText()
     Ext.start_work()
