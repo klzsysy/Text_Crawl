@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 抓取网页提取正文保存到文件或发送到邮箱（适合Kindle）
@@ -393,7 +394,7 @@ class FeaturesList(object):
         """
         抓取目录也的章节URL
         """
-        def __init__(self, all_page_url_soup, rest, protocol):
+        def __init__(self, all_page_url_soup, rest, protocol, domain):
             self.protocol = protocol
             self.soup = all_page_url_soup
             self.rest = rest
@@ -406,6 +407,12 @@ class FeaturesList(object):
                     self.content = self.soup.find_all('div', re.compile('%s' % x))
                     if len(self.content) != 0:
                         break
+            if len(self.content) == 0:
+                r = re.match('(%s)(.+)$' % domain, self.rest.strip('/'))
+                if r:
+                    book_location = r.group(2)
+                    self.content = self.soup.find_all('a', href=re.compile(book_location))
+
             if len(self.content) == 0:
                 self.content = self.soup.find_all('a', href=re.compile("^http:%s|\d+\..{2,4}$" % self.rest))
             if len(self.content) == 0:
@@ -427,7 +434,7 @@ class FeaturesList(object):
             return raw
 
         def get_href(self, url_merge):
-            page_rul = []
+            page_url = []
             for index in self.urllist:
                 href_str = index.get('href')
                 title = index.get_text().strip()
@@ -441,19 +448,18 @@ class FeaturesList(object):
                     continue
                 if re.search('订阅本卷|vip|VIP', title):                            # 没登录 VIP章节直接丢弃
                     break
-                page_rul.append([title, self.special_treatment(href_str)])
+                page_url.append([title, self.special_treatment(href_str)])
             # 合并函数          原始URL                   要组合的列表
-            end_links = map(url_merge, [self.rest] * len(page_rul), [x[1] for x in page_rul],
-                            [self.protocol] * len(page_rul))
+            end_links = map(url_merge, [self.rest] * len(page_url), [x[1] for x in page_url], [self.protocol] * len(page_url))
 
             x = 0
             for link in end_links:
-                page_rul[x][1] = link
+                page_url[x][1] = link
                 x += 1
-            if len(page_rul) == 0:
+            if len(page_url) == 0:
                 raise IndexError('\n\n{}\nThe directory page can not find a valid url, '
                                  'Possible links are incorrect or not supported by script'.format(self.rest.strip('/')))
-            return page_rul
+            return page_url
 
     def match_chinese(self, s):
         try:
@@ -476,7 +482,6 @@ class FeaturesList(object):
         :return:        提取的章节URL 列表
         """
 
-
         self.loggings.debug('Open original url %s' % ori_url)
         try:
             soup_text, protocol, ori_domain, rest, code, ori_cookie = self.get_url_to_bs(ori_url, re_count=retry)
@@ -489,7 +494,7 @@ class FeaturesList(object):
             self.origin_url_title = soup_text.title.string
             self.loggings.debug('Start the analysis original html doc...')
 
-            get_page_links = self.GetPageLinks(soup_text, rest, protocol)
+            get_page_links = self.GetPageLinks(soup_text, rest, protocol, ori_domain)
             all_page_links = self.read_qidian(page_soup=soup_text, page_link=ori_url, make='get_page_links')
             if all_page_links is None:
                 self.loggings.info('开始通过通用方法获得所有url')
@@ -631,7 +636,7 @@ class ExtractText(FeaturesList):
         self.loggings.debug('blocks_size={0};save_image={1};leave_blank={2};drawing={3}loop={4}'.format(self.blocks_size,
                         self.save_image, self.leave_blank, self.drawing, self.loop))
         if self.drawing:
-            self.Draw = Draw_processing()
+            self.Draw = DrawProcessing()
 
     def tags_process(self):
         self.body = re.sub(self.reCOMM, "", self.body)
@@ -806,7 +811,7 @@ class ExtractText(FeaturesList):
                     n = 1
                 x.string = '{}'.format('\n' * n)      # 方法将当前节点用空行替换
 
-    def extract_text(self, page_link, page_title, page_id=0):
+    def extract_text(self, page_link, page_title, page_id=0, loop=3):
         """
         请求URL并提取主要文本
         :return: UTF-8编码的字符串和页面标题
@@ -844,10 +849,17 @@ class ExtractText(FeaturesList):
         self.loggings.info('Page text filtering is complete [%s]' % page_title)
 
         if text is None:
+            # 空数据重试
+            self.loggings.debug('%s 获取数据为空' % page_link)
+            while loop > 0:
+                self.loggings.debug('抓取到空数据 重试：%s' % page_link)
+                return self.extract_text(page_link, page_title, page_id, loop=loop-1)
             return None, page_title, direction_url
+
         text = page_title + '\n\n' + text
         """编码转换 极为重要，编码成utf-8后解码utf-8 并忽略错误的内容"""
         text = text.encode('utf-8').decode('utf-8', 'ignore')
+
         return text, page_title, direction_url
 
     def start_work(self):
@@ -903,7 +915,7 @@ class ExtractText(FeaturesList):
         while link_list:
             pop = link_list.pop(0)  # 提取一条链接并从原始列表删除
             title = pop[0]      # title
-            link  = pop[1]      # link
+            link = pop[1]       # link
             count = pop[2]      # id
             self.x = 1          # 单url分析次数
             try:
@@ -926,6 +938,7 @@ class ExtractText(FeaturesList):
                         self.Error_url.append(msg)
                     elif self.args.c:
                         self.loggings.warning('读取数据为空 可能遇到了VIP章节或是不支持的站点')
+                        self.loggings.error('数据读取为空，当前进程%s退出！' % multiprocessing.current_process().name)
                         break
                 else:  # 内容非空
                     wr = self.write_text(count, title, page_text, page_count)                       # 写入文件
@@ -968,10 +981,11 @@ def mu_th(links, page):
         m.start()  # 开始线程
     for mu in mu_list:
         mu.join()  # 等待所有线程完成
+    print(links)
     public.loggings.info('Multi-threaded processing is complete! ')
 
 
-class Draw_processing(object):
+class DrawProcessing(object):
     """
     多进程模式画出字块分布函数图
     """
@@ -1086,7 +1100,7 @@ def args_parser():
     parse.add_argument('-pv', nargs='?', type=int, choices=range(2, 11), default=default_args['pv'],
                        help='翻页参数，丢弃小于段落平均长度1/pv的内容')
     parse.add_argument('-r', nargs=1, dest='retry', type=int, choices=range(0, 8), default=[default_args['r']], help='最大请求失败重试次数')
-    parse.add_argument('-m', type=int, choices=range(1, 6), default=default_args['m'], help='多线程倍数, N = m x cpu')
+    parse.add_argument('-m', type=int, choices=range(1, 10), default=default_args['m'], help='多线程倍数, N = m x cpu')
     parse.add_argument('-debug', nargs=1, type=int, choices=range(0, 4), default=[default_args['debug']],
                        help='debug功能，0关闭，1输出到控制台，2输出到文件，3同时输出')
 
@@ -1110,7 +1124,7 @@ def args_parser():
                               help='将结果输出到指定目标 %(choices)s')
 
     parse.add_argument('--version', action='version', version='%(prog)s 1.0.3', help='显示版本号')
-    # ide_debug = '-c http://www.80txt.com/txtml_20343.html'.split()
+    # ide_debug = '-c http://www.shushu8.com/zaizhitianxia/ -b 3 -m 8'.split()
     # ide_debug = '-c http://www.piaotian.net/html/7/7929/'.split()
     ide_debug = None                        # 方便开启关闭在ide里模拟参数输入debug
     args_ = parse.parse_args(ide_debug)
