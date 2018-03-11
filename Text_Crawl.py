@@ -44,7 +44,7 @@ default_args = {
     'pv': 2,                                        # 翻页时不同长度段落的有效比例1/pv, 即最短文本不小于平均文本的pv倍
     'r': 3,                                         # 最大失败重试次数
     'debug': 3,                                     # 0关闭，1输出到控制台，2输出到文件，3同时输出
-    'debug_level': 'info',                          # debug级别
+    'debug_level': 'info',                         # debug级别
     'block_size': 4,                                # 文本行块分布函数块大小
     'drawing': False,                               # 显示文本块函数，默认不显示
     'leave_blank': True,                            # 保留空格与空行，默认开启
@@ -52,8 +52,8 @@ default_args = {
     'ad': True,                                     # 删除可能的广告，默认删除
     'loop': False,                                  # 对页面进行多次筛选 适合有多段文本，默认关闭
     'dest': 'file',                                 # 结果输出位置
-    'min_text_length': 120,                         # 页面最长文本段落的最小长度 小于这个值的将直接丢弃
-    'm': 2,                                         # 多线程数量  m x cpu
+    'min_text_length': 80,                          # 页面最长文本段落的最小长度 小于这个值的将直接丢弃
+    'm': 4,                                         # 多线程数量  m x cpu
     # 邮件相关配置
     'email': False,                                     # 将结果发送邮件发送
     'email_to_address':     'xxxxxxxxxx@kindle.cn',     # 默认邮件收件人，可多人 用;分割
@@ -668,11 +668,13 @@ class ExtractText(FeaturesList):
         for x in range(len(self.c_texts) - self.blocks_size + 1):
             self.c_blocks.append(sum([len(y) for y in self.c_texts[x:x + self.blocks_size]]))
         self.loggings.debug('len(c_blocks) = %s' % len(self.c_blocks))
-        # 首次过滤最长的文本段没有达到预定义的长度 则视为太短抛弃
-        if max(self.c_texts_length) <= self.min_text_length and not self.analyzed_again:
+
+        # 首次过滤最长的文本段没有达到预定义的长度 则视为太短抛弃, 单页模式有效
+        if max(self.c_texts_length) <= self.min_text_length and not self.analyzed_again and self.args.s:
             self.loggings.debug('文本长度小于预设值{}，被抛弃:\n{}\n{}\n{}'.format(self.min_text_length, '-'*40,
                                                                       self.c_texts[self.c_texts_length.index(max(
                                                                           self.c_texts_length))], '-' * 40))
+            self.loggings.warning(self.origin_url_title + ' 小于最小变量 min_text_length，将被丢弃！！')
             return None
         '''函数分布图的最高点'''
         self.loggings.debug('max(c_text_length) = %s' % max(self.c_texts_length))
@@ -775,7 +777,8 @@ class ExtractText(FeaturesList):
         except Exception:
             # 某些body异常的网页
             self.body = self.raw_page
-        if self.save_image: self.body = self.reIMG.sub(r'{{\1}}', self.body)
+        if self.save_image:
+            self.body = self.reIMG.sub(r'{{\1}}', self.body)
         self.tags_process()
         self.c_texts = self.body.split("\n")
         self.text = self.blocks_process()
@@ -850,11 +853,11 @@ class ExtractText(FeaturesList):
 
         if text is None:
             # 空数据重试
-            self.loggings.debug('%s 获取数据为空' % page_link)
             while loop > 0:
-                self.loggings.debug('抓取到空数据 重试：%s' % page_link)
+                self.loggings.warning('抓取到空数据 重试：%s' % page_link)
                 return self.extract_text(page_link, page_title, page_id, loop=loop-1)
-            return None, page_title, direction_url
+            else:
+                return None, page_title, direction_url
 
         text = page_title + '\n\n' + text
         """编码转换 极为重要，编码成utf-8后解码utf-8 并忽略错误的内容"""
@@ -868,7 +871,7 @@ class ExtractText(FeaturesList):
         """
         if not self.args.dest == 'terminal':                    # 检测目录
             self.try_mkdir(self.down_path)
-        if not self.args.c:
+        if self.args.s:
             page_count = 1
             self.single_process([['', self.args.s, 1000]], page_count)
         else:
@@ -937,9 +940,7 @@ class ExtractText(FeaturesList):
                     if not direction_url and self.args.s and len(text_cache) == 0:
                         self.Error_url.append(msg)
                     elif self.args.c:
-                        self.loggings.warning('读取数据为空 可能遇到了VIP章节或是不支持的站点')
-                        self.loggings.error('数据读取为空，当前进程%s退出！' % multiprocessing.current_process().name)
-                        break
+                        self.loggings.warning('%s: 读取数据为空 可能遇到了VIP章节或是不支持的站点' % link)
                 else:  # 内容非空
                     wr = self.write_text(count, title, page_text, page_count)                       # 写入文件
                     if wr is not True:
@@ -959,7 +960,7 @@ class ExtractText(FeaturesList):
                     self.output_text_terminal(cache)
                 if self.args.email:
                     email = Sendemail(text=cache, title=self.origin_url_title, to_addr=self.args.email,
-                                       url=[x for x in [self.args.c, self.args.s] if x][0])         # 原始URL
+                                      url=[x for x in [self.args.c, self.args.s] if x][0])         # 原始URL
                     email.send()
 
 
@@ -1123,7 +1124,7 @@ def args_parser():
     switch_group.add_argument('-dest', choices=['file', 'terminal', 'all'], default=default_args['dest'],
                               help='将结果输出到指定目标 %(choices)s')
 
-    parse.add_argument('--version', action='version', version='%(prog)s 1.0.3', help='显示版本号')
+    parse.add_argument('--version', action='version', version='%(prog)s 1.1.2', help='显示版本号')
     # ide_debug = '-c http://www.shushu8.com/zaizhitianxia/ -b 3 -m 8'.split()
     # ide_debug = '-c http://www.piaotian.net/html/7/7929/'.split()
     ide_debug = None                        # 方便开启关闭在ide里模拟参数输入debug
