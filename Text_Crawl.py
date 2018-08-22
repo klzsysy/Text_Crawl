@@ -271,11 +271,13 @@ class FeaturesList(object):
             return True
         title = re.sub(r'[/\\:\*\?\"<>\|]', '-', title)                             # 过滤文件名非法字符
         if self.args.s and count == 1000 and self.args.direction is False:
-            filename_format = '.\{}\{}.txt'.format(self.down_path, title)
+            filename_format = os.path.join('.', self.down_path, title + '.txt')
+            # filename_format = '.\{}\{}.txt'.format(self.down_path, title)
         else:
-            filename_format = '.\{0}\{1:<{2}} {3}.txt'.format(self.down_path, str(count), len(str(page_count)), title)
+            filename_format = os.path.join('.', self.down_path, '{0:<{1}} {2}.txt'.format(str(count), len(str(page_count)), title))
+            # filename_format = '.\{0}\{1:<{2}} {3}.txt'.format(self.down_path, str(count), len(str(page_count)), title)
 
-        saved_filename.append(filename_format.split('\\')[-1])                      # 记录文件名
+        saved_filename.append(os.path.split(filename_format)[-1])                      # 记录文件名
         if self.args.s:
             # 单页模式缓存文本内容 #并记录文件名
             # saved_filename.append(filename_format.split('\\')[-1])
