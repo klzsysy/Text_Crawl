@@ -25,21 +25,21 @@
 
 * 抓取某本小说，-c 目录模式 贴上小说目录页地址，可获得每节文本与合并的文本
 ```sh
->python Text_Crawl.py -c http://book.qidian.com/info/1003516610#Catalog
+python3 Text_Crawl.py -c http://book.qidian.com/info/1003516610#Catalog
 ```
 
 * -m 1 降低线程倍数，适应速度较慢的网站
 ```sh
->python Text_Crawl.py -c http://www.52dsm.com/chapter/6712.html -m 1
+python3 Text_Crawl.py -c http://www.52dsm.com/chapter/6712.html -m 1
 ```
 * 抓取某个页面的正文，-s 单页模式 贴上地址即可
 ```sh
->python Text_Crawl.py -s http://news.mydrivers.com/1/505/505220.htm
+python3 Text_Crawl.py -s http://news.mydrivers.com/1/505/505220.htm
 ```
 
-* 获取某吧的同人正文。`-s`单页模式，`-pn`向后翻页，`--loop 3`页面循环查找，收集不小于平均段落长度1/3的文本
+* 获取某吧的同人正文。`-s`单页模式，`-pn`向后翻页，`-loop 3`页面循环查找，收集不小于平均段落长度1/3的文本
 ```sh
->python Text_Crawl.py -s https://tieba.baidu.com/p/1061691931 -pn --loop 3
+python3 Text_Crawl.py -s https://tieba.baidu.com/p/1061691931 -pn -loop 3
 ```
 
 
@@ -50,16 +50,16 @@
 
 
 ```sh
->python Text_Crawl.py -s http://tieba.baidu.com/p/4794348007 -loop -pn down -pv 3 --blank-remove
+python3 Text_Crawl.py -s http://tieba.baidu.com/p/4794348007 -loop -pn down -pv 3 --blank-remove
 ```
 
 
 * 抓取一个包含代码的页面，目的是抓取正文并保留缩进。这个页面可发现正文较为分散，因此可能需要尝试不同的参数以获得最佳效果。-b是过滤算法的块参数，越大越包容，越小则丢弃越多，--dr绘图显示页面文本的分布函数 以便调整参数，-loop 5 单页循环抓取并设定最长段落与最短相差不超过5倍，dest 直接在终端输出结果。
 ```sh
->python Text_Crawl.py -s http://beautifulsoup.readthedocs.io/zh_CN/latest/ -b 10 --dr -loop 5 -dest terminal
+python3 Text_Crawl.py -s http://beautifulsoup.readthedocs.io/zh_CN/latest/ -b 10 --dr -loop 5 -dest terminal
 ```
 
 * 更多使用帮助
 ```
->python Text_Crawl.py -h
+python3 Text_Crawl.py -h
 ```
