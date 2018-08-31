@@ -289,7 +289,10 @@ class FeaturesList(object):
                 self.loggings.info('Save Page To File: %s' % title)
                 with open(filename_format, 'w', encoding='utf-8') as f:
                     f.write(text)
-                self.loggings.info('The text was successfully written to the file [%-4s %s]' % (count, title))
+                if self.args.s:
+                    self.loggings.info('The text was successfully written to the file [%s]' % filename_format)
+                else:
+                    self.loggings.info('The text was successfully written to the file [%-4s %s]' % (count, title))
             except BaseException as err:
                 return err
             else:
@@ -829,16 +832,19 @@ class ExtractText(FeaturesList):
         # 处理title
         get_page_title = self.page_soup.title.get_text()
         if page_title == '' or self.args.direction:
-            page_title = get_page_title
+            page_title = get_page_title.strip()
             if self.get_next_page is False:
                 self.loggings.debug('获取原始页title %s' % page_title)
                 self.origin_url_title = page_title
 
         # 翻页
-        if self.page_soup and self.args.direction:
+        if self.page_soup and self.args.direction and self.args.pnn:
             direction_url = self.next_page(self.page_soup, direction=self.args.direction)
             if direction_url:
                 direction_url = self.url_merge(page_url=page_link, raw_url=direction_url, protocol=protocol)
+            # 翻页数量 -1
+            if type(self.args.pnn) is int:
+                self.args.pnn -= 1
 
         self.loggings.info('Read Complete [%s]' % page_title)
 
@@ -1100,6 +1106,7 @@ def args_parser():
     ''''''
     parse.add_argument('-pn', nargs='?', dest='direction', choices=['up', 'down'], const='down', default=default_args['pn'],
                        help='尝试向前或向后翻页, 不指定方向时默认向后翻页')
+    parse.add_argument('-pnn', type=int, default=True, help='限制翻页数量，默认为找到的所有')
     parse.add_argument('-pv', nargs='?', type=int, choices=range(2, 11), default=default_args['pv'],
                        help='翻页参数，丢弃小于段落平均长度1/pv的内容')
     parse.add_argument('-r', nargs=1, dest='retry', type=int, choices=range(0, 8), default=[default_args['r']], help='最大请求失败重试次数')
