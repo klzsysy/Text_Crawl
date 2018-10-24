@@ -284,7 +284,7 @@ class FeaturesList(object):
             text_cache.append([text, count-999])
 
         if not self.args.dest == 'terminal':
-            self.loggings.info('write file %s' % title)
+            self.loggings.info('write file %s' % filename_format)
             try:
                 self.loggings.info('Save Page To File: %s' % title)
                 with open(filename_format, 'w', encoding='utf-8') as f:
@@ -833,6 +833,8 @@ class ExtractText(FeaturesList):
             if self.get_next_page is False:
                 self.loggings.debug('获取原始页title %s' % page_title)
                 self.origin_url_title = page_title
+
+        page_title = page_title.strip()
 
         # 翻页
         if self.page_soup and self.args.direction:
