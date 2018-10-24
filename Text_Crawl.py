@@ -834,7 +834,7 @@ class ExtractText(FeaturesList):
                 self.loggings.debug('获取原始页title %s' % page_title)
                 self.origin_url_title = page_title
 
-        page_title = page_title.strip()
+        page_title = page_title.strip().replace(' ', '')
 
         # 翻页
         if self.page_soup and self.args.direction:
